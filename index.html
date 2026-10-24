@@ -85,6 +85,11 @@ header.top .monthnav{justify-self:center}
 .triple div{display:flex;flex-direction:column;gap:2px;min-width:0}
 .triple span{font-size:12px;color:var(--muted)}
 .triple b{font-family:var(--f-num);font-weight:600;font-size:15px;overflow-wrap:anywhere}
+.risk{display:flex;flex-direction:column;gap:4px;border-top:1px dashed var(--line);padding-top:12px}
+.risk b{font-size:14px;font-weight:700;display:flex;align-items:center;gap:7px}
+.risk b::before{content:"";flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--accent)}
+.risk.warn b::before{background:var(--warn)} .risk.bad b{color:var(--out)} .risk.bad b::before{background:var(--out)} .risk.none b::before{background:var(--line)}
+.risk span{font-size:12.5px;color:var(--muted);line-height:1.55}
 .c-in{color:var(--in)} .c-out{color:var(--out)} .c-save{color:var(--save)}
 .remain{display:flex;flex-direction:column;gap:4px;border-top:1px dashed var(--line);padding-top:12px}
 .remain .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
@@ -339,7 +344,7 @@ function num(v){return Number(String(v).replace(/[^\d]/g,""))||0}
 function uid(p){return p+"-"+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function toast(t){const el=document.getElementById("toast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,2400)}
 function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);if(v===null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,v)}catch(e){return null}}
-function cfg(){const s=S.settings||{};return{accounts:(s.accounts&&s.accounts.length)?s.accounts:DEF_ACC,groups:s.groups||DEF_GROUPS,startDay:Math.min(28,Math.max(1,Number(s.startDay)||1)),payShift:s.payShift||null,pinHash:s.pinHash||null}}
+function cfg(){const s=S.settings||{};return{accounts:(s.accounts&&s.accounts.length)?s.accounts:DEF_ACC,groups:s.groups||DEF_GROUPS,startDay:Math.min(28,Math.max(1,Number(s.startDay)||1)),payShift:s.payShift||null,lifeBudget:Number(s.lifeBudget)||0,lifeAcc:s.lifeAcc||null,pinHash:s.pinHash||null}}
 function bonusRate(id){const a=cfg().accounts.find(x=>x.id===id);return a&&Number(a.bonus)||0}
 function acctName(id){const a=cfg().accounts.find(a=>a.id===id);return a?a.name:"(삭제된 통장)"}
 function groupOf(type,cat){const gs=cfg().groups[type]||[];for(const g of gs)if(g.items.includes(cat))return g.name;return type==="save"?"저축":type==="in"?"수입":"기타"}
@@ -464,10 +469,50 @@ function render(){
   else h=renderPhotos();
   body.innerHTML=h;
 }
+function spendAccs(){const a=cfg().accounts;return a.some(x=>x.spend!==undefined)?a.filter(x=>x.spend):a.filter(x=>!x.saving)}
+function riskInfo(p){
+  if(!isCurrent(p))return null;
+  const acc=spendAccs();if(!acc.length)return null;
+  const ids=acc.map(a=>a.id),t=todayStr();let cash=0,missing=0;
+  acc.forEach(a=>{const n=balNow(a);if(n===null)missing++;else cash+=n});
+  if(missing===acc.length)return{noBal:true};
+  let fut=0;
+  S.entries.forEach(e=>{if(e.date>t&&e.date<p.es)ids.forEach(id=>{fut+=flow(e,id)})});
+  pendingFixed(p).forEach(x=>{if(x.d<=t)return;const f=x.f,ty=f.type||"out",r=ty==="move"?bonusRate(f.to):0,e={type:ty,amount:f.amount,account:f.account,to:f.to,bonus:r?Math.round((Number(f.amount)||0)*r/100):0};ids.forEach(id=>{fut+=flow(e,id)})});
+  const days=Math.max(1,Math.round((p.e-p.s)/864e5)),left=Math.max(0,Math.round((p.e-pdate(t))/864e5)-1);
+  const bud=cfg().lifeBudget,need=bud?Math.round(bud/days*left):0,end=cash+fut;
+  let life=null;const la=cfg().lifeAcc&&cfg().accounts.find(a=>a.id===cfg().lifeAcc);
+  if(la&&balNow(la)!==null){let lf=0;S.entries.forEach(e=>{if(e.date>t&&e.date<p.es)lf+=flow(e,la.id)});
+    pendingFixed(p).forEach(x=>{if(x.d<=t)return;const f=x.f,ty=f.type||"out",r=ty==="move"?bonusRate(f.to):0;lf+=flow({type:ty,amount:f.amount,account:f.account,to:f.to,bonus:r?Math.round((Number(f.amount)||0)*r/100):0},la.id)});
+    const now=balNow(la),avail=now+lf;life={name:la.name.replace(/\s*\(.*\)\s*$/,"")||la.name,now,lf,avail,margin:avail-need,perDay:left?Math.floor(avail/left):avail}}
+  return{cash,fut,end,need,margin:end-need,bud,left,missing,life};
+}
+function riskCard(){
+  const r=riskInfo(period());if(!r)return '';
+  if(r.noBal)return '<div class="risk none"><b>통장 잔액을 넣으면 알려 드려요</b><span>설정에서 생활에 쓰는 통장의 현재 잔액을 넣으면, 이번 기간에 저축 통장을 건드려야 하는지 계산해 드려요.</span></div>';
+  const m=r.margin,st=m<0?"bad":m<50000?"warn":"ok";
+  const title=st==="bad"?"이대로면 "+fmt(-m)+"원 모자라요":st==="warn"?"빠듯해요 · 기간 끝에 "+cpt(m)+"원 남아요":"저축 통장 안 건드려도 돼요";
+  let sub="생활 통장 "+cpt(r.cash)+(r.fut<0?" − 남은 고정비 "+cpt(-r.fut):r.fut>0?" + 들어올 돈 "+cpt(r.fut):"")+(r.bud?" − 남은 "+r.left+"일 생활비 "+cpt(r.need):"")+" → 기간 끝 "+(m<0?"−":"")+cpt(Math.abs(m));
+  if(st==="bad")sub="저축 통장에서 옮겨야 할 수 있어요. "+sub;
+  if(!r.bud)sub+=" · 설정에서 한 기간 생활비 예산을 넣으면 더 정확해요";
+  if(r.missing)sub+=" · 잔액을 안 넣은 통장 "+r.missing+"개는 빠졌어요";
+  let h='<div class="risk '+st+'"><b>'+esc(title)+'</b><span>'+esc(sub)+'</span></div>';
+  const L=r.life;
+  if(L){
+    const lm=L.margin,ls=!r.bud?(L.avail<0?"bad":"ok"):lm<0?"bad":lm<20000?"warn":"ok";
+    const need=Math.ceil(-(r.bud?lm:L.avail)/10000)*10000;
+    const lt=ls==="bad"?L.name+"에 약 "+cpt(need)+"원 충전이 필요해요":ls==="warn"?L.name+" 충전 없이 빠듯해요":L.name+" 충전 안 해도 돼요";
+    let lsub=L.name+" "+cpt(L.now)+(L.lf<0?" − 남은 고정비 "+cpt(-L.lf):L.lf>0?" + 들어올 돈 "+cpt(L.lf):"")+(r.bud?" − 남은 생활비 "+cpt(r.need)+" → 기간 끝 "+(lm<0?"−":"")+cpt(Math.abs(lm)):"");
+    if(ls==="bad")lsub+=m>=0?" · 다른 생활 통장에서 옮기면 돼요":" · 저축 통장에서 옮겨야 할 수 있어요";
+    if(r.left&&L.avail>0)lsub+=" · 하루 "+fmt(L.perDay)+"원까지 쓰면 충전 없이 기간 끝까지 가요";
+    h+='<div class="risk '+ls+'"><b>'+esc(lt)+'</b><span>'+esc(lsub)+'</span></div>';
+  }
+  return h;
+}
 function summaryCard(){
   const t=totals(),left=t.in-t.out-t.save;
   return '<section class="summary"><div class="sum-top"><span class="left-label">이번 기간 남은 돈</span><b class="left-amt num '+(left<0?'c-out':'')+'">'+(left<0?'−':'')+fmt(Math.abs(left))+'원</b></div>'+
-    '<div class="triple"><div><span>수입</span><b class="c-in">'+fmt(t.in)+'</b></div><div><span>지출</span><b class="c-out">'+fmt(t.out)+'</b></div><div><span>저축</span><b class="c-save">'+fmt(t.save)+'</b></div></div></section>';
+    '<div class="triple"><div><span>수입</span><b class="c-in">'+fmt(t.in)+'</b></div><div><span>지출</span><b class="c-out">'+fmt(t.out)+'</b></div><div><span>저축</span><b class="c-save">'+fmt(t.save)+'</b></div></div>'+riskCard()+'</section>';
 }
 function pendingBanner(p){
   const pend=pendingFixed(p);if(!pend.length)return '';
@@ -711,14 +756,16 @@ function drawFixed(){
 }
 function openSettings(){
   const c=cfg();
-  form={kind:"settings",accounts:c.accounts.map(a=>{const n=balNow(a);return Object.assign({},a,{balIn:n===null?"":fmt(n),balOrig:n})}),groups:JSON.parse(JSON.stringify(c.groups)),startDay:c.startDay,payShift:c.payShift,gtype:"out",restore:null};
+  form={kind:"settings",accounts:c.accounts.map(a=>{const n=balNow(a);return Object.assign({},a,{balIn:n===null?"":fmt(n),balOrig:n})}),groups:JSON.parse(JSON.stringify(c.groups)),startDay:c.startDay,payShift:c.payShift,lifeBudget:c.lifeBudget,lifeAcc:c.lifeAcc,gtype:"out",restore:null};
   drawSettings();
 }
 function drawSettings(){
   const f=form,c=cfg(),gs=f.groups[f.gtype]||(f.groups[f.gtype]=[]);
   let h='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-label="설정"><h3>설정</h3>';
   h+='<div class="field"><label for="s-start">가계부 시작일 (월급날)</label><select id="s-start">'+Array.from({length:28},(_,i)=>'<option value="'+(i+1)+'"'+(f.startDay===i+1?" selected":"")+'>매월 '+(i+1)+'일부터</option>').join("")+'</select><p class="hint">예: 25일로 정하면 9월 25일 ~ 10월 24일이 한 기간이에요.</p><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px"><input type="checkbox" id="s-shift"'+(f.payShift?' checked':'')+' style="flex:0 0 auto;width:18px;height:18px">월급날이 주말·공휴일이면 그 전 평일부터 새 기간 시작</label></div>';
-  h+='<div class="setblock"><h4>통장 · 현재 잔액</h4>'+f.accounts.map((a,i)=>'<div class="set-row"><input id="s-acc-'+esc(a.id)+'" data-acc="'+i+'" value="'+esc(a.name)+'" aria-label="통장 이름"><button data-act="s-acc-del" data-i="'+i+'">빼기</button></div><div class="set-row"><input id="s-bal-'+esc(a.id)+'" data-bal="'+i+'" class="num" inputmode="numeric" autocomplete="off" placeholder="지금 은행 앱에 보이는 잔액 (원)" value="'+esc(a.balIn||"")+'" aria-label="'+esc(a.name)+' 현재 잔액"></div><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px"><input type="checkbox" id="s-sav-'+esc(a.id)+'" data-sav="'+i+'"'+(a.saving?' checked':'')+' style="flex:0 0 auto;width:18px;height:18px">이 통장으로 옮긴 돈은 저축으로 세기</label><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px">충전하면<input id="s-bon-'+esc(a.id)+'" data-bon="'+i+'" class="num" inputmode="numeric" autocomplete="off" placeholder="0" value="'+esc(a.bonus||"")+'" style="flex:0 0 64px;width:64px;padding:6px 8px" aria-label="'+esc(a.name)+' 충전 혜택 퍼센트">% 더 들어와요 (지역화폐 등)</label>').join("")+'<div class="addline"><input id="s-acc-new" placeholder="새 통장 이름"><button data-act="s-acc-add">추가</button></div><p class="hint">은행 앱에 지금 보이는 잔액을 넣으면, 그 뒤로 적는 기록만큼 자동으로 더하고 빼서 실제 잔액을 보여줘요. 잔액이 은행 앱과 달라지면 여기서 다시 맞추면 돼요. 통장을 빼도 이미 적은 기록은 남아요.</p></div>';
+  h+='<div class="field"><label for="s-budget">한 기간 생활비 예산 (고정비 말고 쓸 돈)</label><input id="s-budget" class="num" inputmode="numeric" autocomplete="off" placeholder="예: 300,000" value="'+(f.lifeBudget?fmt(f.lifeBudget):"")+'"><p class="hint">장보기·용돈처럼 고정비 말고 쓰는 돈이에요. 남은 날짜만큼 나눠서, 저축 통장을 건드려야 하는지 계산할 때 써요.</p></div>';
+  h+='<div class="field"><label for="s-lifeacc">생활비를 쓰는 통장</label><select id="s-lifeacc"><option value="">선택 안 함</option>'+f.accounts.map(a=>'<option value="'+esc(a.id)+'"'+(f.lifeAcc===a.id?" selected":"")+'>'+esc(a.name||"이름 없는 통장")+'</option>').join("")+'</select><p class="hint">고르면 이 통장만 따로 계산해서, 이번 기간에 충전해야 하는지 알려 드려요.</p></div>';
+  h+='<div class="setblock"><h4>통장 · 현재 잔액</h4>'+f.accounts.map((a,i)=>'<div class="set-row"><input id="s-acc-'+esc(a.id)+'" data-acc="'+i+'" value="'+esc(a.name)+'" aria-label="통장 이름"><button data-act="s-acc-del" data-i="'+i+'">빼기</button></div><div class="set-row"><input id="s-bal-'+esc(a.id)+'" data-bal="'+i+'" class="num" inputmode="numeric" autocomplete="off" placeholder="지금 은행 앱에 보이는 잔액 (원)" value="'+esc(a.balIn||"")+'" aria-label="'+esc(a.name)+' 현재 잔액"></div><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px"><input type="checkbox" id="s-sav-'+esc(a.id)+'" data-sav="'+i+'"'+(a.saving?' checked':'')+' style="flex:0 0 auto;width:18px;height:18px">이 통장으로 옮긴 돈은 저축으로 세기</label><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px"><input type="checkbox" data-spend="'+i+'"'+(spendAccs().some(x=>x.id===a.id)||(a.spend===undefined&&!a.saving&&!cfg().accounts.some(x=>x.id===a.id))?' checked':'')+' style="flex:0 0 auto;width:18px;height:18px">생활에 쓰는 통장 (모자라는지 계산에 넣기)</label><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px">충전하면<input id="s-bon-'+esc(a.id)+'" data-bon="'+i+'" class="num" inputmode="numeric" autocomplete="off" placeholder="0" value="'+esc(a.bonus||"")+'" style="flex:0 0 64px;width:64px;padding:6px 8px" aria-label="'+esc(a.name)+' 충전 혜택 퍼센트">% 더 들어와요 (지역화폐 등)</label>').join("")+'<div class="addline"><input id="s-acc-new" placeholder="새 통장 이름"><button data-act="s-acc-add">추가</button></div><p class="hint">은행 앱에 지금 보이는 잔액을 넣으면, 그 뒤로 적는 기록만큼 자동으로 더하고 빼서 실제 잔액을 보여줘요. 잔액이 은행 앱과 달라지면 여기서 다시 맞추면 돼요. 통장을 빼도 이미 적은 기록은 남아요.</p></div>';
   h+='<div class="setblock"><h4>분류</h4><div class="seg three">'+[["out","지출"],["save","저축"],["in","수입"]].map(([k,l])=>'<button aria-pressed="'+(f.gtype===k)+'" data-act="s-gtype" data-k="'+k+'">'+l+'</button>').join("")+'</div>';
   gs.forEach((g,gi)=>{h+='<div class="gedit"><div class="gh"><span>'+esc(g.name)+'</span>'+(gs.length>1?'<button data-act="s-g-del" data-i="'+gi+'">대분류 빼기</button>':'')+'</div><div class="chips">'+g.items.map((x,i)=>'<button class="chip x" data-act="s-cat-del" data-gi="'+gi+'" data-i="'+i+'" aria-label="'+esc(x)+' 빼기">'+esc(x)+'<span>×</span></button>').join("")+'</div></div>'});
   h+='<div class="addline"><select id="s-cat-g" aria-label="넣을 대분류">'+gs.map((g,i)=>'<option value="'+i+'">'+esc(g.name)+'</option>').join("")+'</select><input id="s-cat-new" placeholder="새 분류 (예: 부모님 선물)"><button data-act="s-cat-add">추가</button></div>';
@@ -731,12 +778,14 @@ function drawSettings(){
   h+='</div></div>';
   paint(h);
   document.getElementById("s-start").addEventListener("change",e=>form.startDay=Number(e.target.value));
+  document.getElementById("s-lifeacc").addEventListener("change",e=>form.lifeAcc=e.target.value||null);
+  const sbud=document.getElementById("s-budget");sbud.addEventListener("input",()=>{const v=num(sbud.value);form.lifeBudget=v;sbud.value=v?fmt(v):""});
   document.getElementById("s-shift").addEventListener("change",e=>{form.payShift=e.target.checked?(cfg().payShift||dstr(new Date(new Date().getFullYear(),new Date().getMonth(),1))):null});
   document.getElementById("bk-file").addEventListener("change",onRestoreFile);
 }
-function syncSettingsInputs(){if(!form||form.kind!=="settings")return;document.querySelectorAll("[data-acc]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.acc)];if(a)a.name=inp.value});document.querySelectorAll("[data-bal]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.bal)];if(a)a.balIn=inp.value});document.querySelectorAll("[data-sav]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.sav)];if(a)a.saving=inp.checked});document.querySelectorAll("[data-bon]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.bon)];if(a)a.bonus=Math.min(100,num(inp.value))})}
+function syncSettingsInputs(){if(!form||form.kind!=="settings")return;document.querySelectorAll("[data-acc]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.acc)];if(a)a.name=inp.value});document.querySelectorAll("[data-bal]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.bal)];if(a)a.balIn=inp.value});document.querySelectorAll("[data-sav]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.sav)];if(a)a.saving=inp.checked});document.querySelectorAll("[data-spend]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.spend)];if(a)a.spend=inp.checked});document.querySelectorAll("[data-bon]").forEach(inp=>{const a=form.accounts[Number(inp.dataset.bon)];if(a)a.bonus=Math.min(100,num(inp.value))})}
 function accOut(a){
-  const o={id:a.id,name:a.name.trim()};if(a.saving)o.saving=true;if(Number(a.bonus)>0)o.bonus=Number(a.bonus);const raw=String(a.balIn||"").trim(),neg=/^[-−]/.test(raw),v=num(raw)*(neg?-1:1);
+  const o={id:a.id,name:a.name.trim()};if(a.saving)o.saving=true;if(a.spend!==undefined)o.spend=!!a.spend;if(Number(a.bonus)>0)o.bonus=Number(a.bonus);const raw=String(a.balIn||"").trim(),neg=/^[-−]/.test(raw),v=num(raw)*(neg?-1:1);
   if(!raw)return o;
   if(a.balOrig!==null&&a.balOrig!==undefined&&v===a.balOrig&&typeof a.bal==="number"){o.bal=a.bal;o.asOf=a.asOf;return o}
   o.bal=v;o.asOf=todayStr();return o;
@@ -906,7 +955,7 @@ document.addEventListener("click",async ev=>{
   if(act==="s-cat-del"){syncSettingsInputs();const g=form.groups[form.gtype][Number(b.dataset.gi)];if(g.items.length<=1)return toast("대분류에 분류가 하나는 있어야 해요");g.items.splice(Number(b.dataset.i),1);return drawSettings()}
   if(act==="s-g-add"){syncSettingsInputs();const v=document.getElementById("s-g-new").value.trim();if(!v)return;const gs=form.groups[form.gtype];if(!gs.some(g=>g.name===v))gs.push({name:v,items:["기타"]});return drawSettings()}
   if(act==="s-g-del"){syncSettingsInputs();form.groups[form.gtype].splice(Number(b.dataset.i),1);return drawSettings()}
-  if(act==="s-save"){syncSettingsInputs();const next={accounts:form.accounts.filter(a=>a.name.trim()).map(accOut),groups:form.groups,startDay:form.startDay,payShift:form.payShift||null};closeSheet();S.offset=0;S.day=null;S.subKey=null;await saveSettings(next);return}
+  if(act==="s-save"){syncSettingsInputs();const next={accounts:form.accounts.filter(a=>a.name.trim()).map(accOut),groups:form.groups,startDay:form.startDay,payShift:form.payShift||null,lifeBudget:form.lifeBudget||null,lifeAcc:form.lifeAcc&&form.accounts.some(a=>a.id===form.lifeAcc&&a.name.trim())?form.lifeAcc:null};closeSheet();S.offset=0;S.day=null;S.subKey=null;await saveSettings(next);return}
   if(act==="pin-set"){form=null;pin={mode:"set1",val:"",msg:""};return drawPinSheet()}
   if(act==="pin-off"){if(!b.classList.contains("armed")){b.classList.add("armed");b.textContent="한 번 더 누르면 꺼져요";return}closeSheet();ss("gyb-unlock",null);return saveSettings({pinHash:undefined},"잠금을 껐어요")}
   if(act==="bk-json")return backupJSON();
