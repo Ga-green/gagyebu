@@ -85,6 +85,8 @@ header.top .monthnav{justify-self:center}
 .triple div{display:flex;flex-direction:column;gap:2px;min-width:0}
 .triple span{font-size:12px;color:var(--muted)}
 .left-amt.pre{font-size:18px;color:var(--muted);font-weight:600}
+.summary.ob h2{margin:0;font-size:18px}
+.summary.ob h4{margin:6px 0 -4px;font-size:13px;color:var(--ink)}
 .innote{font-size:12px;color:var(--muted);margin-top:-4px}
 .triple b{font-family:var(--f-num);font-weight:600;font-size:15px;overflow-wrap:anywhere}
 .risk{display:flex;flex-direction:column;gap:4px;border-top:1px dashed var(--line);padding-top:12px}
@@ -359,6 +361,8 @@ const WK=["일","월","화","수","목","금","토"];
 const S={settings:null,fixed:[],entries:[],offset:0,tab:"cal",day:null,openG:{},withSave:false,noFixed:false,showDone:false,listMode:"all",got:{s:false,f:false,e:false},err:null,subKey:null,unlocked:false,gallery:null,balEntries:[],balKey:null};
 let db=null,dl=null,assets=null,unsubE=null,unsubG=null,unsubB=null,form=null,pin=null;
 const MAXPH=6;
+const ONBOARD=true;
+let ob=null;
 function blob(id){return "/_blob/"+encodeURIComponent(id)}
 function shrink(file){return new Promise((res,rej)=>{const url=URL.createObjectURL(file);const img=new Image();img.onload=()=>{const m=1600,r=Math.min(1,m/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.max(1,Math.round(img.width*r));c.height=Math.max(1,Math.round(img.height*r));c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);c.toBlob(b=>b?res(b):rej(new Error("encode")),"image/jpeg",.82)};img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("decode"))};img.src=url})}
 function dropAssets(ids){if(!assets)return;(ids||[]).forEach(id=>{assets.delete(id).catch(()=>{})})}
@@ -427,8 +431,10 @@ function restInfo(f,p){
   const salary=pays.reduce((a,e)=>a+(Number(e.amount)||0),0);let other=0;
   S.entries.forEach(e=>{if(e.fixedId&&!e.payroll&&e.fixedId!==f.id&&e.account===f.account&&inP(e))other+=Number(e.amount)||0});
   pendingFixed(p).forEach(x=>{if(x.f.id!==f.id&&!x.f.payroll&&x.f.account===f.account)other+=Number(x.f.amount)||0});
-  const left=salary-other;
-  return{salary,other,left,amount:Math.max(0,left),short:left<0?-left:0};
+  const c=cfg();let life=0;
+  if(!c.lifeAcc||c.lifeAcc===f.account){const es=envStats();life=es?es.list.reduce((a,v)=>a+v.amount,0):c.lifeBudget}
+  const left=salary-other-life;
+  return{salary,other,life,left,amount:Math.max(0,left),short:left<0?-left:0};
 }
 function fxAmt(f,p){if(f&&f.rest&&p){const r=restInfo(f,p);if(r)return r.amount}return Number(f&&f.amount)||0}
 function restNote(p){
@@ -519,6 +525,7 @@ function render(){
   const body=document.getElementById("body"),fab=document.getElementById("fab");
   if(S.err){fab.hidden=true;setNav(false);body.innerHTML='<div class="notice">'+(S.err==="nodb"?"이 화면에서는 기록을 저장할 수 없어요. claude.ai에 로그인한 상태에서 이 페이지를 열어주세요.":"기록을 불러오지 못했어요. 페이지를 새로 고쳐 주세요.")+'</div>';return}
   if(!db||!S.got.s||!S.got.f||!S.got.e){fab.hidden=true;setNav(false);body.innerHTML='<div class="notice">기록을 불러오는 중이에요…</div>';return}
+  if(ONBOARD&&!S.settings){fab.hidden=true;setNav(false);body.innerHTML=onboardHTML();bindOb();return}
   if(!S.unlocked){fab.hidden=true;setNav(false);if(!pin||pin.mode!=="unlock")pin={mode:"unlock",val:"",msg:""};body.innerHTML=lockHTML();return}
   fab.hidden=false;setNav(true);
   let h='';
@@ -724,7 +731,7 @@ function renderFixed(p){
   const yr=S.fixed.filter(f=>f.freq==="yearly").sort((a,b)=>(a.month||0)-(b.month||0)||a.day-b.day);
   const sum=l=>l.filter(f=>f.active!==false&&f.type!=="move").reduce((s,f)=>s+(Number(f.amount)||0),0);
   const row=f=>{const ds=dueAll(f,p),n=ds.length,ri=f.rest&&n?restInfo(f,p):null,st=(!n?'':(dn[f.id]||0)>=n?'<span class="stat ok">체크함</span>':(cnt[f.id]||0)>=n?'<span class="stat wait">체크 전</span>':'<span class="stat wait">넣기 전</span>')+(n?'<span class="stat">'+ds.map(md).join(", ")+'</span>':'')+(n>1?'<span class="stat wait">이번 기간 '+n+'번</span>':''),sf=startTag(f);
-    return '<button class="row2" data-act="edit-fixed" data-id="'+esc(f.id)+'"><span class="cat-pill '+(f.type==="save"?"save":f.type==="move"?"move":"")+'">'+(f.freq==="yearly"?f.month+'월 '+(f.payday?'월급날':f.day+'일'):f.payday?'월급날':'매월 '+f.day+'일')+'</span><span class="t"><b>'+esc(f.name)+st+sf+'</b><small>'+(f.type==="move"?'옮기기 · '+esc(acctName(f.account)+" → "+acctName(f.to)):esc(groupOf(f.type||"out",f.category))+' › '+esc(f.category)+' · '+esc((f.payroll?"월급에서 바로 빠짐":acctName(f.account))+(f.type==="save"&&f.to?" → "+acctName(f.to):"")))+'</small>'+(f.rest?'<small class="restcalc">'+(ri?'남는 돈: 월급 '+fmt(ri.salary)+' − 다른 고정비 '+fmt(ri.other)+(ri.short?' = '+fmt(ri.short)+'원 모자람':' = '+fmt(ri.amount)):'남는 돈 전부 · 월급을 넣으면 금액이 맞춰져요 (지금은 예상 금액)')+'</small>':'')+'</span><span class="a '+(f.type==="save"?'c-save':f.type==="move"?'':'c-out')+'">'+fmt(ri?ri.amount:f.amount)+'</span></button>'};
+    return '<button class="row2" data-act="edit-fixed" data-id="'+esc(f.id)+'"><span class="cat-pill '+(f.type==="save"?"save":f.type==="move"?"move":"")+'">'+(f.freq==="yearly"?f.month+'월 '+(f.payday?'월급날':f.day+'일'):f.payday?'월급날':'매월 '+f.day+'일')+'</span><span class="t"><b>'+esc(f.name)+st+sf+'</b><small>'+(f.type==="move"?'옮기기 · '+esc(acctName(f.account)+" → "+acctName(f.to)):esc(groupOf(f.type||"out",f.category))+' › '+esc(f.category)+' · '+esc((f.payroll?"월급에서 바로 빠짐":acctName(f.account))+(f.type==="save"&&f.to?" → "+acctName(f.to):"")))+'</small>'+(f.rest?'<small class="restcalc">'+(ri?'남는 돈: 월급 '+fmt(ri.salary)+' − 다른 고정비 '+fmt(ri.other)+(ri.life?' − 생활비 '+fmt(ri.life):'')+(ri.short?' = '+fmt(ri.short)+'원 모자람':' = '+fmt(ri.amount)):'남는 돈 전부 · 월급을 넣으면 금액이 맞춰져요 (지금은 예상 금액)')+'</small>':'')+'</span><span class="a '+(f.type==="save"?'c-save':f.type==="move"?'':'c-out')+'">'+fmt(ri?ri.amount:f.amount)+'</span></button>'};
   let h='<div class="ledger">';
   if(!S.fixed.length)h+='<div class="empty"><b>등록된 고정비가 없어요.</b><span>아래 ‘고정비 추가’로 통신비·구독료처럼 매달 나가는 돈을 등록하세요.</span></div>';
   if(mon.length)h+='<div class="dgroup"><b>매월 나가는 돈 '+mon.length+'건</b><span class="sums">'+fmt(sum(mon))+'원</span></div>'+mon.map(row).join('');
@@ -756,6 +763,42 @@ async function hashPin(p,like){
   const fnv=()=>{let h=2166136261;for(const c of t){h^=c.charCodeAt(0);h=Math.imul(h,16777619)>>>0}return "f"+h.toString(16)};
   if(like&&like[0]==="f")return fnv();
   try{const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("")}catch(e){return fnv()}
+}
+function bindOb(){["ob-pramt","ob-budget"].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener("input",()=>{const v=num(el.value);el.value=v?fmt(v):""})});}
+function obRead(){const g=id=>{const el=document.getElementById(id);return el?el.value:""};if(!ob)return;
+  ob.day=Number(g("ob-day"))||ob.day;ob.pay=g("ob-pay");ob.life=g("ob-life");ob.save=g("ob-save");ob.prName=g("ob-prname");ob.prAmt=num(g("ob-pramt"));ob.budget=num(g("ob-budget"))}
+function onboardHTML(){
+  if(!ob)ob={day:25,shift:true,pay:"월급 통장",life:"",save:"저축 통장",prName:"",prAmt:0,budget:0};
+  const o=ob,inp=(id,v,ph,numb)=>'<input id="'+id+'"'+(numb?' class="num" inputmode="numeric" autocomplete="off"':'')+' value="'+esc(numb?(v?fmt(v):""):v)+'" placeholder="'+esc(ph)+'">';
+  let h='<section class="summary ob"><h2>처음 설정</h2><p class="hint">몇 가지만 알려주면 월급날 기준으로 한 달을 나누고, 매달 남는 돈을 계산해 줘요. 입력한 내용은 이 기기 브라우저에만 저장되고, 나중에 설정과 고정 탭에서 언제든 바꿀 수 있어요.</p>';
+  h+='<h4>1. 월급</h4><div class="field"><label for="ob-day">월급 받는 날</label><select id="ob-day">'+Array.from({length:28},(_,i)=>'<option value="'+(i+1)+'"'+(o.day===i+1?" selected":"")+'>매달 '+(i+1)+'일</option>').join("")+'</select></div>';
+  h+='<div class="chips"><button class="chip" aria-pressed="'+o.shift+'" data-act="ob-shift">주말·공휴일이면 그 전 평일에 받아요</button></div>';
+  h+='<h4>2. 통장</h4><div class="field"><label for="ob-pay">월급이 들어오는 통장</label>'+inp("ob-pay",o.pay,"예: 월급 통장")+'</div>';
+  h+='<div class="field"><label for="ob-life">생활비를 따로 쓰는 통장 (없으면 비워두기)</label>'+inp("ob-life",o.life,"예: 생활비 통장")+'</div>';
+  h+='<div class="field"><label for="ob-save">매달 남는 돈을 모을 저축 통장 (안 모으면 비워두기)</label>'+inp("ob-save",o.save,"예: 저축 통장")+'</div>';
+  h+='<h4>3. 월급에서 바로 빠지는 저축</h4><p class="hint">급여명세서에서 월급이 통장에 들어오기 전에 빠지는 저축이 있으면 적어 주세요(예: 사내 적립금). 없으면 비워두면 돼요. 이렇게 해 두면 월급은 통장에 들어온 금액 그대로 넣으면 돼요.</p>';
+  h+='<div class="two-col"><div class="field"><label for="ob-prname">이름</label>'+inp("ob-prname",o.prName,"예: 사내 적립금")+'</div><div class="field"><label for="ob-pramt">매달 금액 (원)</label>'+inp("ob-pramt",o.prAmt,"0",true)+'</div></div>';
+  h+='<h4>4. 생활비</h4><div class="field"><label for="ob-budget">한 달(월급날~다음 월급날) 생활비 예산 (원, 모르면 비워두기)</label>'+inp("ob-budget",o.budget,"예: 500,000",true)+'</div>';
+  h+='<p class="hint">통신비·구독료·적금처럼 매달 나가는 돈은 시작한 뒤 ‘고정’ 탭에서 추가하세요. 남는 돈은 ‘월급 − 고정비 − 생활비’로 계산돼요.</p>';
+  h+='<div class="actions"><button data-act="ob-skip">건너뛰기</button><button class="primary" data-act="ob-start">시작하기</button></div></section>';
+  return h;
+}
+async function obFinish(skip){
+  obRead();const o=ob||{},sd=o.day||25,accs=[],fx=[];
+  const pay=(o.pay||"").trim()||"월급 통장",life=(o.life||"").trim(),sv=(o.save||"").trim(),pr=(o.prName||"").trim();
+  accs.push({id:"a-pay",name:pay,spend:true});
+  if(!skip&&life)accs.push({id:"a-life",name:life,spend:true});
+  if(!skip&&sv)accs.push({id:"a-save",name:sv,spend:false});
+  if(!skip&&pr&&o.prAmt)accs.push({id:"a-payroll",name:pr,saving:true,spend:false});
+  if(!skip){
+    if(pr&&o.prAmt)fx.push(["f-payroll",{name:pr,type:"save",amount:o.prAmt,category:"예적금/연금",account:"a-pay",to:"a-payroll",freq:"monthly",day:sd,payday:true,payroll:true,active:true}]);
+    if(life&&o.budget)fx.push(["f-life",{name:"생활비 통장으로 옮기기",type:"move",amount:o.budget,category:"이동",account:"a-pay",to:"a-life",freq:"monthly",day:sd,payday:true,active:true}]);
+    if(sv)fx.push(["f-rest",{name:"남는 돈 저축",type:"save",amount:0,category:"예적금/연금",account:"a-pay",to:"a-save",freq:"monthly",day:sd,payday:true,rest:true,active:true}]);
+  }
+  for(const [id,d] of fx){const ok=await write(()=>db.collection("fixed").doc(id).set(d));if(!ok)return}
+  const set={accounts:accs,startDay:sd,payShift:(skip||o.shift)?"2000-01-01":null,fixShift:true,lifeBudget:skip?0:(o.budget||0),onboarded:true};
+  if(!skip&&life)set.lifeAcc="a-life";
+  ob=null;await saveSettings(set,skip?"기본 설정으로 시작해요":"설정을 저장했어요");
 }
 function lockHTML(){
   const titles={unlock:"잠금 번호를 눌러주세요",set1:"새 잠금 번호 4자리",set2:"한 번 더 눌러주세요"};
@@ -841,7 +884,7 @@ function drawFixed(){
   h+='<div class="seg three">'+[["out","지출"],["save","저축"],["move","옮기기"]].map(([k,l])=>'<button aria-pressed="'+(f.type===k)+'" data-act="x-type" data-k="'+k+'">'+l+'</button>').join("")+'</div>';
   h+='<div class="field"><label for="x-amt">금액 (원)</label><input id="x-amt" class="amt-in" inputmode="numeric" autocomplete="off" placeholder="0" value="'+(f.amount?fmt(f.amount):"")+'"></div>';
   if(f.type!=="move")h+='<div class="field"><span class="lab">분류</span>'+catPicker(f.type,f.category,f.group,"x-cat")+'</div>';
-  if(f.type!=="move")h+='<div class="field"><div class="chips"><button class="chip" aria-pressed="'+!!f.payroll+'" data-act="x-payroll">월급에서 바로 빠짐</button></div><p class="hint">급여명세서 공제내역에서 빠지는 돈(교직원공제회 등)이면 켜세요. 월급은 통장에 들어온 금액 그대로 넣으면 되고, 이 돈은 통장 잔액에서 다시 빼지 않아요. 저축으로는 그대로 잡혀요.</p></div>';
+  if(f.type!=="move")h+='<div class="field"><div class="chips"><button class="chip" aria-pressed="'+!!f.payroll+'" data-act="x-payroll">월급에서 바로 빠짐</button></div><p class="hint">급여명세서 공제내역에서 바로 빠지는 저축이면 켜세요. 월급은 통장에 들어온 금액 그대로 넣으면 되고, 이 돈은 통장 잔액에서 다시 빼지 않아요. 저축으로는 그대로 잡혀요.</p></div>';
   h+='<div class="field"><span class="lab">'+(f.payroll&&f.type!=="move"?'명세서 공제 전 기준 통장 (월급이 들어오는 통장)':'나가는 통장')+'</span><div class="chips">'+c.accounts.map(a=>'<button class="chip" aria-pressed="'+(f.account===a.id)+'" data-act="x-acc" data-k="'+esc(a.id)+'">'+esc(a.name)+'</button>').join("")+'</div></div>';
   if(f.type==="save")h+=saveToField(f.to,f.account,"x-saveto");
   if(f.type==="move")h+='<div class="field"><span class="lab">받는 통장</span><div class="chips">'+c.accounts.filter(a=>a.id!==f.account).map(a=>'<button class="chip" aria-pressed="'+(f.to===a.id)+'" data-act="x-moveto" data-k="'+esc(a.id)+'">'+esc(a.name)+'</button>').join("")+'</div><p class="hint">내 통장끼리 옮기는 돈이라 지출로 세지 않아요.</p></div>';
@@ -991,6 +1034,9 @@ document.addEventListener("click",async ev=>{
   if(act==="tab"){S.tab=k;S.day=null;try{localStorage.setItem("gyb-tab",k)}catch(e){}window.scrollTo(0,0);return render()}
   if(act==="day"){S.day=S.day===k?null:k;return render()}
   if(act==="day-clear"){S.day=null;return render()}
+  if(act==="ob-shift"){obRead();ob.shift=!ob.shift;return render()}
+  if(act==="ob-start"){return obFinish(false)}
+  if(act==="ob-skip"){return obFinish(true)}
   if(act==="list-mode"){S.listMode=k==="fx"?"fx":"all";return render()}
   if(act==="done-toggle"){S.showDone=!S.showDone;try{localStorage.setItem("gyb-showdone",S.showDone?"1":"0")}catch(e){}return render()}
   if(act==="ana-save"){S.withSave=k==="1";return render()}
@@ -1050,7 +1096,7 @@ document.addEventListener("click",async ev=>{
   if(act==="x-save"){
     const f=form;
     if(!f.name.trim())return toast("이름을 넣어주세요");
-    if(!f.amount)return toast("금액을 넣어주세요");
+    if(!f.amount&&!f.rest)return toast("금액을 넣어주세요");
     if(f.type==="move"){if(!f.to||f.to===f.account)return toast("받는 통장을 골라주세요");f.category="이동"}
     else if(!f.category)return toast("분류를 골라주세요");
     const id=f.id||uid("f");
