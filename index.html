@@ -154,6 +154,7 @@ header.top .monthnav{justify-self:center}
 .ledger{background:var(--sheet);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .ledger .colh{display:grid;grid-template-columns:52px 1fr auto;gap:8px;padding:8px 14px;font-size:11px;color:var(--muted);letter-spacing:.06em;border-bottom:1px solid var(--line);background:var(--paper)}
 .ledger .colh.day-h{display:flex;justify-content:space-between;letter-spacing:0;font-size:12px}
+.donetog{display:block;width:100%;margin-top:8px;padding:11px;border:1px dashed var(--line);border-radius:12px;background:transparent;color:var(--muted);font-size:13px}
 .ledger .colh.day-h button{border:0;background:transparent;color:var(--accent);font-size:12px;padding:0}
 .row-e{display:grid;grid-template-columns:52px 1fr auto;gap:8px;align-items:center;padding:11px 14px;border:0;border-bottom:1px solid var(--line);width:100%;text-align:left;background:transparent}
 .row-e:last-child{border-bottom:0}
@@ -350,7 +351,7 @@ const DEF_GROUPS={
 const DEF_ACC=[{id:"a-fixed",name:"고정비 통장"},{id:"a-life",name:"생활비 통장"}];
 const TYPES=[["out","지출"],["save","저축"],["in","수입"],["move","이동"]];
 const WK=["일","월","화","수","목","금","토"];
-const S={settings:null,fixed:[],entries:[],offset:0,tab:"cal",day:null,openG:{},withSave:false,noFixed:false,got:{s:false,f:false,e:false},err:null,subKey:null,unlocked:false,gallery:null,balEntries:[],balKey:null};
+const S={settings:null,fixed:[],entries:[],offset:0,tab:"cal",day:null,openG:{},withSave:false,noFixed:false,showDone:false,got:{s:false,f:false,e:false},err:null,subKey:null,unlocked:false,gallery:null,balEntries:[],balKey:null};
 let db=null,dl=null,assets=null,unsubE=null,unsubG=null,unsubB=null,form=null,pin=null;
 const MAXPH=6;
 function blob(id){return "/_blob/"+encodeURIComponent(id)}
@@ -631,15 +632,18 @@ function renderList(p){
   let rows=S.entries.slice();
   if(S.day)rows=rows.filter(e=>e.date===S.day);
   rows.sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.createdAt||0)-(b.createdAt||0));
+  const doneN=rows.filter(e=>e.fixedId&&e.done).length;
+  if(!S.showDone)rows=rows.filter(e=>!(e.fixedId&&e.done));
+  const tog=doneN?'<button class="donetog" data-act="done-toggle">'+(S.showDone?'체크한 고정비 숨기기':'체크한 고정비 '+doneN+'건 보기')+'</button>':'';
   let h='<div class="ledger">';
   if(S.day){const d=pdate(S.day);h+='<div class="colh day-h"><span>'+(d.getMonth()+1)+'월 '+d.getDate()+'일 ('+WK[d.getDay()]+') 거래</span><button data-act="day-clear">기간 전체 보기</button></div>'}
-  if(!rows.length)return h+'<div class="empty"><b>'+(S.day?'이 날 기록이 없어요.':'이번 기간 기록이 아직 없어요.')+'</b><span>오른쪽 아래 ‘+ 기록’으로 지출이나 월급을 넣어보세요.</span></div></div>';
+  if(!rows.length)return h+(doneN?'<div class="empty"><b>체크 안 한 기록이 없어요.</b><span>체크한 고정비는 아래 버튼으로 볼 수 있어요.</span></div></div>'+tog:'<div class="empty"><b>'+(S.day?'이 날 기록이 없어요.':'이번 기간 기록이 아직 없어요.')+'</b><span>오른쪽 아래 ‘+ 기록’으로 지출이나 월급을 넣어보세요.</span></div></div>');
   const by={};rows.forEach(e=>{(by[e.date]=by[e.date]||[]).push(e)});
   Object.keys(by).forEach(ds=>{
     if(!S.day){const d=pdate(ds);h+='<div class="dgroup"><b>'+(d.getMonth()+1)+'.'+d.getDate()+' ('+WK[d.getDay()]+')</b>'+daySums(by[ds])+'</div>'}
     const slot=by[ds].some(e=>e.fixedId);h+=by[ds].map(e=>rowEntry(e,slot)).join('');
   });
-  return h+'</div>';
+  return h+'</div>'+tog;
 }
 function subGallery(){
   if(unsubG||!db)return;
@@ -943,6 +947,7 @@ document.addEventListener("click",async ev=>{
   if(act==="tab"){S.tab=k;S.day=null;try{localStorage.setItem("gyb-tab",k)}catch(e){}window.scrollTo(0,0);return render()}
   if(act==="day"){S.day=S.day===k?null:k;return render()}
   if(act==="day-clear"){S.day=null;return render()}
+  if(act==="done-toggle"){S.showDone=!S.showDone;try{localStorage.setItem("gyb-showdone",S.showDone?"1":"0")}catch(e){}return render()}
   if(act==="ana-save"){S.withSave=k==="1";return render()}
   if(act==="ana-fixed"){S.noFixed=k==="1";try{localStorage.setItem("gyb-nofixed",S.noFixed?"1":"0")}catch(e){}return render()}
   if(act==="ana-g"){S.openG[k]=!S.openG[k];return render()}
@@ -1035,6 +1040,7 @@ document.getElementById("next").addEventListener("click",()=>changePeriod(1));
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&form)closeSheet()});
 try{const t=localStorage.getItem("gyb-tab");if(["cal","fixed","acct","ana"].includes(t))S.tab=t}catch(e){}
 try{S.noFixed=localStorage.getItem("gyb-nofixed")==="1"}catch(e){}
+try{S.showDone=localStorage.getItem("gyb-showdone")==="1"}catch(e){}
 boot();
 })();
 </script>
