@@ -114,6 +114,16 @@ header.top .monthnav{justify-self:center}
 .pending{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--warn-soft);color:var(--warn);border-radius:12px;padding:10px 12px;font-size:13px}
 .pending button{background:var(--accent);color:var(--accent-ink);border:0;border-radius:9px;padding:8px 12px;font-weight:700;white-space:nowrap}
 .done-note{font-size:13px;color:var(--muted)}
+.ulist{display:flex;flex-direction:column;border-top:1px dashed var(--line);padding-top:4px}
+.urow{display:grid;grid-template-columns:auto minmax(0,1fr) auto 40px;gap:8px;align-items:center;min-height:42px;border-bottom:1px solid var(--line)}
+.urow:last-child{border-bottom:0}
+.urow .ud{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.urow .un{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.urow .ua{font-size:14px;font-weight:600}
+.urow.late .ud{color:var(--warn);font-weight:700}
+.urow .chk{padding:0;height:40px}
+.urow > .stat{justify-self:end;margin:0}
+.stat:not(.ok):not(.wait){color:var(--muted)}
 .section-h{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .section-h h2{margin:0;font-size:13px;color:var(--muted);font-weight:500;letter-spacing:.04em}
 .accts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
@@ -359,7 +369,7 @@ function num(v){return Number(String(v).replace(/[^\d]/g,""))||0}
 function uid(p){return p+"-"+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
 function toast(t){const el=document.getElementById("toast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,2400)}
 function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);if(v===null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,v)}catch(e){return null}}
-function cfg(){const s=S.settings||{};return{accounts:(s.accounts&&s.accounts.length)?s.accounts:DEF_ACC,groups:s.groups||DEF_GROUPS,startDay:Math.min(28,Math.max(1,Number(s.startDay)||1)),payShift:s.payShift||null,lifeBudget:Number(s.lifeBudget)||0,lifeAcc:s.lifeAcc||null,envelopes:Array.isArray(s.envelopes)?s.envelopes:[],pinHash:s.pinHash||null}}
+function cfg(){const s=S.settings||{};return{accounts:(s.accounts&&s.accounts.length)?s.accounts:DEF_ACC,groups:s.groups||DEF_GROUPS,startDay:Math.min(28,Math.max(1,Number(s.startDay)||1)),payShift:s.payShift||null,fixShift:!!s.fixShift,lifeBudget:Number(s.lifeBudget)||0,lifeAcc:s.lifeAcc||null,envelopes:Array.isArray(s.envelopes)?s.envelopes:[],pinHash:s.pinHash||null}}
 function bonusRate(id){const a=cfg().accounts.find(x=>x.id===id);return a&&Number(a.bonus)||0}
 function acctName(id){const a=cfg().accounts.find(a=>a.id===id);return a?a.name:"(삭제된 통장)"}
 function groupOf(type,cat){const gs=cfg().groups[type]||[];for(const g of gs)if(g.items.includes(cat))return g.name;return type==="save"?"저축":type==="in"?"수입":"기타"}
@@ -368,6 +378,7 @@ function groupOf(type,cat){const gs=cfg().groups[type]||[];for(const g of gs)if(
 /* 공휴일: 2026.10~2030 확인된 날짜(대체공휴일 포함). 그 뒤 해는 양력 고정 공휴일만 봄 */
 const HOL=new Set(["2026-10-05", "2026-10-09", "2026-12-25", "2027-01-01", "2027-02-06", "2027-02-07", "2027-02-08", "2027-02-09", "2027-03-01", "2027-05-01", "2027-05-03", "2027-05-05", "2027-05-13", "2027-06-06", "2027-07-17", "2027-07-19", "2027-08-15", "2027-08-16", "2027-09-14", "2027-09-15", "2027-09-16", "2027-10-03", "2027-10-04", "2027-10-09", "2027-10-11", "2027-12-25", "2027-12-27", "2028-01-01", "2028-01-26", "2028-01-27", "2028-01-28", "2028-03-01", "2028-04-12", "2028-05-01", "2028-05-02", "2028-05-05", "2028-06-06", "2028-07-17", "2028-08-15", "2028-10-02", "2028-10-03", "2028-10-04", "2028-10-05", "2028-10-09", "2028-12-25", "2029-01-01", "2029-02-12", "2029-02-13", "2029-02-14", "2029-03-01", "2029-05-01", "2029-05-05", "2029-05-07", "2029-05-20", "2029-05-21", "2029-06-06", "2029-07-17", "2029-08-15", "2029-09-21", "2029-09-22", "2029-09-23", "2029-09-24", "2029-10-03", "2029-10-09", "2029-12-25", "2030-01-01", "2030-02-02", "2030-02-03", "2030-02-04", "2030-02-05", "2030-03-01", "2030-05-01", "2030-05-05", "2030-05-06", "2030-05-09", "2030-06-06", "2030-07-17", "2030-08-15", "2030-09-11", "2030-09-12", "2030-09-13", "2030-10-03", "2030-10-09", "2030-12-25"]);
 const HOL_MD=new Set(["01-01","03-01","05-01","05-05","06-06","07-17","08-15","10-03","10-09","12-25"]);
+function nextBiz(ds){let d=pdate(ds);for(let g=0;g<10&&(d.getDay()===0||d.getDay()===6||isHol(dstr(d)));g++)d=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1);return dstr(d)}
 function isHol(ds){return HOL.has(ds)||(ds>"2030-12-31"&&HOL_MD.has(ds.slice(5)))}
 function payDay(y,m){
   const sd=cfg().startDay,ps=cfg().payShift;let d=new Date(y,m,sd);
@@ -390,12 +401,13 @@ function periodLabel(p){
 function isCurrent(p){const t=todayStr();return t>=p.ss&&t<p.es}
 function dueAll(f,p){
   if(f.payday&&f.freq!=="yearly")return (f.start&&p.ss<f.start)?[]:[p.ss];
-  const out=[];
-  for(const k of [0,1]){
+  const out=[],sh=cfg().fixShift;
+  for(const k of [-1,0,1]){
     const b=new Date(p.s.getFullYear(),p.s.getMonth()+k,1),yy=b.getFullYear(),mm=b.getMonth();
     if(f.freq==="yearly"&&Number(f.month)!==mm+1)continue;
-    const last=new Date(yy,mm+1,0).getDate(),dt=dstr(new Date(yy,mm,Math.min(Number(f.day)||1,last)));
-    if(f.start&&dt<f.start)continue;
+    const last=new Date(yy,mm+1,0).getDate(),raw=dstr(new Date(yy,mm,Math.min(Number(f.day)||1,last)));
+    if(f.start&&raw<f.start)continue;
+    const dt=sh?nextBiz(raw):raw;
     if(dt>=p.ss&&dt<p.es)out.push(dt);
   }
   return out;
@@ -551,14 +563,21 @@ function pendingBanner(p){
   return '<div class="pending"><span>아직 안 넣은 고정비 '+pend.length+'건 · <b class="num">'+fmt(sum)+'원</b></span><button data-act="apply-all">한 번에 넣기</button></div>';
 }
 function md(ds){const d=pdate(ds);return (d.getMonth()+1)+'.'+d.getDate()}
+function uncheckedFixed(p){
+  const fx=Object.fromEntries(S.fixed.map(f=>[f.id,f])),out=[];
+  S.entries.forEach(e=>{if(e.fixedId&&!e.done)out.push({d:e.date,name:e.memo||(fx[e.fixedId]&&fx[e.fixedId].name)||"",amount:Number(e.amount)||0,type:e.type,id:e.id})});
+  pendingFixed(p).forEach(x=>out.push({d:x.d,name:x.f.name,amount:Number(x.f.amount)||0,type:x.f.type||"out",pending:true}));
+  return out.sort((a,b)=>a.d.localeCompare(b.d)||a.name.localeCompare(b.name));
+}
 function viewFixed(p){
-  let h='';
-  if(isCurrent(p)){
-    const r=remainFixed(p).filter(x=>x.f.type!=="move"),rs=r.reduce((s,x)=>s+(Number(x.f.amount)||0),0);
-    h+='<section class="summary"><div class="sum-top"><span class="left-label">오늘 이후 나갈 고정비 '+r.length+'건</span><b class="left-amt num c-out">'+fmt(rs)+'원</b></div>';
-    h+=r.length?'<div class="next">'+r.slice(0,4).map(x=>'<div><span>'+md(x.d)+' ('+WK[pdate(x.d).getDay()]+') '+esc(x.f.name)+'</span><span class="num">'+fmt(x.f.amount)+'</span></div>').join('')+(r.length>4?'<div><span class="hint">외 '+(r.length-4)+'건</span><span></span></div>':'')+'</div>':'<div class="done-note">이번 기간에 남은 고정비가 없어요.</div>';
-    h+='</section>';
-  }
+  const u=uncheckedFixed(p),t=todayStr(),cur=isCurrent(p),us=u.reduce((s,x)=>s+(x.type==="move"?0:x.amount),0);
+  let h='<section class="summary"><div class="sum-top"><span class="left-label">아직 체크 안 한 고정비 '+u.length+'건</span><b class="left-amt num c-out">'+fmt(us)+'원</b></div>';
+  if(u.length){
+    h+='<div class="ulist">'+u.map(x=>{const late=cur&&x.d<t,today=cur&&x.d===t;
+      return '<div class="urow'+(late?' late':'')+'"><span class="ud">'+md(x.d)+' ('+WK[pdate(x.d).getDay()]+')'+(late?'<span class="stat wait">지남</span>':today?'<span class="stat ok">오늘</span>':'')+'</span><span class="un">'+esc(x.name)+'</span><span class="ua num">'+(x.type==="move"?'':'−')+fmt(x.amount)+'</span>'+(x.pending?'<span class="stat wait">넣기 전</span>':'<button class="chk" data-act="done" data-id="'+esc(x.id)+'" role="checkbox" aria-checked="false" aria-label="'+esc(x.name)+' 했음 표시"><i></i></button>')+'</div>'}).join('')+'</div>';
+    h+='<p class="hint">이체했거나 빠져나간 걸 확인하면 체크하세요. 체크한 항목은 목록에서 빠져요. 옮기기 금액은 합계에 넣지 않아요.</p>';
+  }else h+='<div class="done-note">이번 기간 고정비를 모두 체크했어요.</div>';
+  h+='</section>';
   return h+pendingBanner(p)+renderFixed(p);
 }
 function viewAcct(p){
@@ -652,11 +671,12 @@ function openViewer(e,i){
 }
 function startTag(f){if(!f.start||f.start<=todayStr())return '';const [sy,sm]=f.start.split("-");return '<span class="stat wait">'+(Number(sy)!==new Date().getFullYear()?sy+'년 ':'')+Number(sm)+'월부터</span>'}
 function renderFixed(p){
-  const cnt=fxCount();
-  const mon=S.fixed.filter(f=>f.freq!=="yearly").sort((a,b)=>a.day-b.day);
+  const cnt=fxCount(),dn={};S.entries.forEach(e=>{if(e.fixedId&&e.done)dn[e.fixedId]=(dn[e.fixedId]||0)+1});
+  const rk=f=>{const ds=dueAll(f,p);if(!ds.length)return[2,"9"+String(f.day).padStart(2,"0")];return[(dn[f.id]||0)>=ds.length?1:0,ds[0]]};
+  const mon=S.fixed.filter(f=>f.freq!=="yearly").sort((a,b)=>{const x=rk(a),y=rk(b);return x[0]-y[0]||x[1].localeCompare(y[1])});
   const yr=S.fixed.filter(f=>f.freq==="yearly").sort((a,b)=>(a.month||0)-(b.month||0)||a.day-b.day);
   const sum=l=>l.filter(f=>f.active!==false&&f.type!=="move").reduce((s,f)=>s+(Number(f.amount)||0),0);
-  const row=f=>{const ds=dueAll(f,p),n=ds.length,st=(!n?'':(cnt[f.id]||0)>=n?'<span class="stat ok">넣음</span>':'<span class="stat wait">넣기 전</span>')+(n>1?'<span class="stat wait">이번 기간 '+n+'번</span>':''),sf=startTag(f);
+  const row=f=>{const ds=dueAll(f,p),n=ds.length,st=(!n?'':(dn[f.id]||0)>=n?'<span class="stat ok">체크함</span>':(cnt[f.id]||0)>=n?'<span class="stat wait">체크 전</span>':'<span class="stat wait">넣기 전</span>')+(n?'<span class="stat">'+ds.map(md).join(", ")+'</span>':'')+(n>1?'<span class="stat wait">이번 기간 '+n+'번</span>':''),sf=startTag(f);
     return '<button class="row2" data-act="edit-fixed" data-id="'+esc(f.id)+'"><span class="cat-pill '+(f.type==="save"?"save":f.type==="move"?"move":"")+'">'+(f.freq==="yearly"?f.month+'월 '+f.day+'일':f.payday?'월급날':'매월 '+f.day+'일')+'</span><span class="t"><b>'+esc(f.name)+st+sf+'</b><small>'+(f.type==="move"?'옮기기 · '+esc(acctName(f.account)+" → "+acctName(f.to)):esc(groupOf(f.type||"out",f.category))+' › '+esc(f.category)+' · '+esc(acctName(f.account)+(f.type==="save"&&f.to?" → "+acctName(f.to):"")))+'</small></span><span class="a '+(f.type==="save"?'c-save':f.type==="move"?'':'c-out')+'">'+fmt(f.amount)+'</span></button>'};
   let h='<div class="ledger">';
   if(!S.fixed.length)h+='<div class="empty"><b>등록된 고정비가 없어요.</b><span>아래 ‘고정비 추가’로 통신비·구독료처럼 매달 나가는 돈을 등록하세요.</span></div>';
@@ -787,7 +807,7 @@ function drawFixed(){
 }
 function openSettings(){
   const c=cfg();
-  form={kind:"settings",accounts:c.accounts.map(a=>{const n=balNow(a);return Object.assign({},a,{balIn:n===null?"":fmt(n),balOrig:n})}),groups:JSON.parse(JSON.stringify(c.groups)),startDay:c.startDay,payShift:c.payShift,lifeBudget:c.lifeBudget,lifeAcc:c.lifeAcc,envelopes:JSON.parse(JSON.stringify(c.envelopes)),gtype:"out",restore:null};
+  form={kind:"settings",accounts:c.accounts.map(a=>{const n=balNow(a);return Object.assign({},a,{balIn:n===null?"":fmt(n),balOrig:n})}),groups:JSON.parse(JSON.stringify(c.groups)),startDay:c.startDay,payShift:c.payShift,fixShift:c.fixShift,lifeBudget:c.lifeBudget,lifeAcc:c.lifeAcc,envelopes:JSON.parse(JSON.stringify(c.envelopes)),gtype:"out",restore:null};
   drawSettings();
 }
 function envEditor(f){
@@ -804,7 +824,7 @@ function envEditor(f){
 function drawSettings(){
   const f=form,c=cfg(),gs=f.groups[f.gtype]||(f.groups[f.gtype]=[]);
   let h='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-label="설정"><h3>설정</h3>';
-  h+='<div class="field"><label for="s-start">가계부 시작일 (월급날)</label><select id="s-start">'+Array.from({length:28},(_,i)=>'<option value="'+(i+1)+'"'+(f.startDay===i+1?" selected":"")+'>매월 '+(i+1)+'일부터</option>').join("")+'</select><p class="hint">예: 25일로 정하면 9월 25일 ~ 10월 24일이 한 기간이에요.</p><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px"><input type="checkbox" id="s-shift"'+(f.payShift?' checked':'')+' style="flex:0 0 auto;width:18px;height:18px">월급날이 주말·공휴일이면 그 전 평일부터 새 기간 시작</label></div>';
+  h+='<div class="field"><label for="s-start">가계부 시작일 (월급날)</label><select id="s-start">'+Array.from({length:28},(_,i)=>'<option value="'+(i+1)+'"'+(f.startDay===i+1?" selected":"")+'>매월 '+(i+1)+'일부터</option>').join("")+'</select><p class="hint">예: 25일로 정하면 9월 25일 ~ 10월 24일이 한 기간이에요.</p><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px"><input type="checkbox" id="s-shift"'+(f.payShift?' checked':'')+' style="flex:0 0 auto;width:18px;height:18px">월급날이 주말·공휴일이면 그 전 평일부터 새 기간 시작</label><label class="set-row" style="font-size:13px;color:var(--muted);gap:6px"><input type="checkbox" id="s-fixshift"'+(f.fixShift?' checked':'')+' style="flex:0 0 auto;width:18px;height:18px">고정비 날짜가 주말·공휴일이면 다음 평일로 (월급날에 맞춘 항목은 빼고)</label></div>';
   if(!f.envelopes.length)h+='<div class="field"><label for="s-budget">한 기간 생활비 예산 (고정비 말고 쓸 돈)</label><input id="s-budget" class="num" inputmode="numeric" autocomplete="off" placeholder="예: 300,000" value="'+(f.lifeBudget?fmt(f.lifeBudget):"")+'"><p class="hint">장보기·용돈처럼 고정비 말고 쓰는 돈이에요. 남은 날짜만큼 나눠서, 저축 통장을 건드려야 하는지 계산할 때 써요.</p></div>';
   h+=envEditor(f);
   h+='<div class="field"><label for="s-lifeacc">생활비를 쓰는 통장</label><select id="s-lifeacc"><option value="">선택 안 함</option>'+f.accounts.map(a=>'<option value="'+esc(a.id)+'"'+(f.lifeAcc===a.id?" selected":"")+'>'+esc(a.name||"이름 없는 통장")+'</option>').join("")+'</select><p class="hint">고르면 이 통장만 따로 계산해서, 이번 기간에 충전해야 하는지 알려 드려요.</p></div>';
@@ -823,6 +843,7 @@ function drawSettings(){
   document.getElementById("s-start").addEventListener("change",e=>form.startDay=Number(e.target.value));
   document.getElementById("s-lifeacc").addEventListener("change",e=>form.lifeAcc=e.target.value||null);
   const sbud=document.getElementById("s-budget");if(sbud)sbud.addEventListener("input",()=>{const v=num(sbud.value);form.lifeBudget=v;sbud.value=v?fmt(v):""});
+  document.getElementById("s-fixshift").addEventListener("change",e=>form.fixShift=e.target.checked);
   document.getElementById("s-shift").addEventListener("change",e=>{form.payShift=e.target.checked?(cfg().payShift||dstr(new Date(new Date().getFullYear(),new Date().getMonth(),1))):null});
   document.getElementById("bk-file").addEventListener("change",onRestoreFile);
 }
@@ -1001,7 +1022,7 @@ document.addEventListener("click",async ev=>{
   if(act==="s-cat-del"){syncSettingsInputs();const g=form.groups[form.gtype][Number(b.dataset.gi)];if(g.items.length<=1)return toast("대분류에 분류가 하나는 있어야 해요");g.items.splice(Number(b.dataset.i),1);return drawSettings()}
   if(act==="s-g-add"){syncSettingsInputs();const v=document.getElementById("s-g-new").value.trim();if(!v)return;const gs=form.groups[form.gtype];if(!gs.some(g=>g.name===v))gs.push({name:v,items:["기타"]});return drawSettings()}
   if(act==="s-g-del"){syncSettingsInputs();form.groups[form.gtype].splice(Number(b.dataset.i),1);return drawSettings()}
-  if(act==="s-save"){syncSettingsInputs();const next={accounts:form.accounts.filter(a=>a.name.trim()).map(accOut),groups:form.groups,startDay:form.startDay,payShift:form.payShift||null,lifeBudget:form.lifeBudget||null,envelopes:form.envelopes.filter(v=>String(v.name||"").trim()).map(v=>({id:v.id||uid("env"),name:String(v.name).trim(),amount:Number(v.amount)||0,cats:v.cats||[]})),lifeAcc:form.lifeAcc&&form.accounts.some(a=>a.id===form.lifeAcc&&a.name.trim())?form.lifeAcc:null};closeSheet();S.offset=0;S.day=null;S.subKey=null;await saveSettings(next);return}
+  if(act==="s-save"){syncSettingsInputs();const next={accounts:form.accounts.filter(a=>a.name.trim()).map(accOut),groups:form.groups,startDay:form.startDay,payShift:form.payShift||null,fixShift:!!form.fixShift,lifeBudget:form.lifeBudget||null,envelopes:form.envelopes.filter(v=>String(v.name||"").trim()).map(v=>({id:v.id||uid("env"),name:String(v.name).trim(),amount:Number(v.amount)||0,cats:v.cats||[]})),lifeAcc:form.lifeAcc&&form.accounts.some(a=>a.id===form.lifeAcc&&a.name.trim())?form.lifeAcc:null};closeSheet();S.offset=0;S.day=null;S.subKey=null;await saveSettings(next);return}
   if(act==="pin-set"){form=null;pin={mode:"set1",val:"",msg:""};return drawPinSheet()}
   if(act==="pin-off"){if(!b.classList.contains("armed")){b.classList.add("armed");b.textContent="한 번 더 누르면 꺼져요";return}closeSheet();ss("gyb-unlock",null);return saveSettings({pinHash:undefined},"잠금을 껐어요")}
   if(act==="bk-json")return backupJSON();
