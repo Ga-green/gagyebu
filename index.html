@@ -423,8 +423,8 @@ function restInfo(f,p){
   const pays=S.entries.filter(e=>e.type==="in"&&e.category==="월급"&&e.account===f.account&&inP(e));
   if(!pays.length)return null;
   const salary=pays.reduce((a,e)=>a+(Number(e.amount)||0),0);let other=0;
-  S.entries.forEach(e=>{if(e.fixedId&&e.fixedId!==f.id&&e.account===f.account&&inP(e))other+=Number(e.amount)||0});
-  pendingFixed(p).forEach(x=>{if(x.f.id!==f.id&&x.f.account===f.account)other+=Number(x.f.amount)||0});
+  S.entries.forEach(e=>{if(e.fixedId&&!e.payroll&&e.fixedId!==f.id&&e.account===f.account&&inP(e))other+=Number(e.amount)||0});
+  pendingFixed(p).forEach(x=>{if(x.f.id!==f.id&&!x.f.payroll&&x.f.account===f.account)other+=Number(x.f.amount)||0});
   const left=salary-other;
   return{salary,other,left,amount:Math.max(0,left),short:left<0?-left:0};
 }
@@ -477,7 +477,7 @@ function subBal(){
 }
 function mainAcc(){const c=cfg();return (c.accounts.find(a=>a.id==="a-fixed")||c.accounts[0]).id}
 function balNow(a){if(!(typeof a.bal==="number"&&a.asOf))return null;const t=todayStr();let n=a.bal;S.balEntries.forEach(e=>{if(e.date>a.asOf&&e.date<=t)n+=flow(e,a.id)});return n}
-function flow(e,id){const v=Number(e.amount)||0;if(e.type==="in"&&e.account===id)return v;if((e.type==="out"||e.type==="save")&&e.account===id)return -v;if(e.type==="move"){if(e.account===id)return -v;if(e.to===id)return v+(Number(e.bonus)||0)}if(e.type==="save"&&e.to===id)return v;return 0}
+function flow(e,id){const v=Number(e.amount)||0;if(e.payroll&&e.account===id&&e.to!==id)return 0;if(e.type==="in"&&e.account===id)return v;if((e.type==="out"||e.type==="save")&&e.account===id)return -v;if(e.type==="move"){if(e.account===id)return -v;if(e.to===id)return v+(Number(e.bonus)||0)}if(e.type==="save"&&e.to===id)return v;return 0}
 async function write(fn,ok){
   try{await fn();if(ok)toast(ok);return true}
   catch(e){toast(e&&e.code==="quota_exceeded"?"저장 공간이 가득 찼어요. 오래된 기록을 지워주세요.":"저장하지 못했어요. 잠시 후 다시 눌러주세요.");return false}
@@ -488,6 +488,7 @@ function saveSettings(patch,ok){const next=Object.assign({},S.settings||{},patch
 function totals(){
   const t={in:0,out:0,save:0},sv=new Set(cfg().accounts.filter(a=>a.saving).map(a=>a.id));
   S.entries.forEach(e=>{const v=Number(e.amount)||0;
+    if(e.payroll&&e.type!=="in")t.in+=v;
     if(e.type==="move"){if(e.bonus)t.in+=Number(e.bonus)||0;const toS=sv.has(e.to),fromS=sv.has(e.account);if(toS&&!fromS)t.save+=v;if(fromS&&!toS)t.save-=v;return}
     if(t[e.type]!==undefined)t[e.type]+=v});
   return t;
@@ -502,7 +503,7 @@ function acctFlows(){
   return cfg().accounts.map(a=>{let inn=0,out=0;
     S.entries.forEach(e=>{const v=Number(e.amount)||0;
       if(e.type==="in"&&e.account===a.id)inn+=v;
-      if((e.type==="out"||e.type==="save")&&e.account===a.id)out+=v;
+      if((e.type==="out"||e.type==="save")&&e.account===a.id&&!e.payroll)out+=v;
       if(e.type==="move"){if(e.account===a.id)out+=v;if(e.to===a.id)inn+=v+(Number(e.bonus)||0)}
       if(e.type==="save"&&e.to===a.id)inn+=v});
     return{a,inn,out}});
@@ -653,7 +654,7 @@ function rowEntry(e,slot){
   const cls=e.type==="in"?"in":e.type==="save"?"save":e.type==="move"?"move":"";
   const pill=e.type==="move"?"이동":e.category;
   const title=e.type==="move"?(acctName(e.account)+" → "+acctName(e.to)):(e.memo||e.category||"");
-  const sub=e.type==="move"?((e.memo||"통장 이동")+(e.bonus?" · 충전 혜택 +"+fmt(e.bonus)+"원":"")):((e.group||groupOf(e.type,e.category))+" · "+acctName(e.account)+(e.type==="save"&&e.to?" → "+acctName(e.to):""));
+  const sub=e.type==="move"?((e.memo||"통장 이동")+(e.bonus?" · 충전 혜택 +"+fmt(e.bonus)+"원":"")):((e.group||groupOf(e.type,e.category))+" · "+(e.payroll?"월급에서 바로 빠짐":acctName(e.account))+(e.type==="save"&&e.to?" → "+acctName(e.to):""));
   const ph=(e.photos&&e.photos.length)?'<img class="thumb" alt="" loading="lazy" src="'+blob(e.photos[0])+'">':'';
   const row='<button class="row2" data-act="edit" data-id="'+esc(e.id)+'"><span class="cat-pill '+cls+'">'+esc(pill)+'</span><span class="t"><b>'+esc(title)+(e.fixedId?'<span class="tag">'+((S.fixed.find(x=>x.id===e.fixedId)||{}).rest?'남는 돈':'고정')+'</span>':'')+(()=>{const i=envOf(e);return i>=0?'<span class="tag env'+(i%2)+'">'+esc(cfg().envelopes[i].name)+'</span>':''})()+'</b><small>'+esc(sub)+'</small></span><span class="ar">'+ph+amtCell(e)+'</span></button>';
   if(e.fixedId)return '<div class="rowx">'+row+'<button class="chk" data-act="done" data-id="'+esc(e.id)+'" role="checkbox" aria-checked="'+!!e.done+'" aria-label="'+esc(title)+' 했음 표시"><i></i></button></div>';
@@ -718,8 +719,8 @@ function renderFixed(p){
   const mon=S.fixed.filter(f=>f.freq!=="yearly").sort((a,b)=>{const x=rk(a),y=rk(b);return x[0]-y[0]||x[1].localeCompare(y[1])});
   const yr=S.fixed.filter(f=>f.freq==="yearly").sort((a,b)=>(a.month||0)-(b.month||0)||a.day-b.day);
   const sum=l=>l.filter(f=>f.active!==false&&f.type!=="move").reduce((s,f)=>s+(Number(f.amount)||0),0);
-  const row=f=>{const ds=dueAll(f,p),n=ds.length,ri=f.rest?restInfo(f,p):null,st=(!n?'':(dn[f.id]||0)>=n?'<span class="stat ok">체크함</span>':(cnt[f.id]||0)>=n?'<span class="stat wait">체크 전</span>':'<span class="stat wait">넣기 전</span>')+(n?'<span class="stat">'+ds.map(md).join(", ")+'</span>':'')+(n>1?'<span class="stat wait">이번 기간 '+n+'번</span>':''),sf=startTag(f);
-    return '<button class="row2" data-act="edit-fixed" data-id="'+esc(f.id)+'"><span class="cat-pill '+(f.type==="save"?"save":f.type==="move"?"move":"")+'">'+(f.freq==="yearly"?f.month+'월 '+(f.payday?'월급날':f.day+'일'):f.payday?'월급날':'매월 '+f.day+'일')+'</span><span class="t"><b>'+esc(f.name)+st+sf+'</b><small>'+(f.type==="move"?'옮기기 · '+esc(acctName(f.account)+" → "+acctName(f.to)):esc(groupOf(f.type||"out",f.category))+' › '+esc(f.category)+' · '+esc(acctName(f.account)+(f.type==="save"&&f.to?" → "+acctName(f.to):"")))+'</small>'+(f.rest?'<small class="restcalc">'+(ri?'남는 돈: 월급 '+fmt(ri.salary)+' − 다른 고정비 '+fmt(ri.other)+(ri.short?' = '+fmt(ri.short)+'원 모자람':' = '+fmt(ri.amount)):'남는 돈 전부 · 월급을 넣으면 금액이 맞춰져요 (지금은 예상 금액)')+'</small>':'')+'</span><span class="a '+(f.type==="save"?'c-save':f.type==="move"?'':'c-out')+'">'+fmt(ri?ri.amount:f.amount)+'</span></button>'};
+  const row=f=>{const ds=dueAll(f,p),n=ds.length,ri=f.rest&&n?restInfo(f,p):null,st=(!n?'':(dn[f.id]||0)>=n?'<span class="stat ok">체크함</span>':(cnt[f.id]||0)>=n?'<span class="stat wait">체크 전</span>':'<span class="stat wait">넣기 전</span>')+(n?'<span class="stat">'+ds.map(md).join(", ")+'</span>':'')+(n>1?'<span class="stat wait">이번 기간 '+n+'번</span>':''),sf=startTag(f);
+    return '<button class="row2" data-act="edit-fixed" data-id="'+esc(f.id)+'"><span class="cat-pill '+(f.type==="save"?"save":f.type==="move"?"move":"")+'">'+(f.freq==="yearly"?f.month+'월 '+(f.payday?'월급날':f.day+'일'):f.payday?'월급날':'매월 '+f.day+'일')+'</span><span class="t"><b>'+esc(f.name)+st+sf+'</b><small>'+(f.type==="move"?'옮기기 · '+esc(acctName(f.account)+" → "+acctName(f.to)):esc(groupOf(f.type||"out",f.category))+' › '+esc(f.category)+' · '+esc((f.payroll?"월급에서 바로 빠짐":acctName(f.account))+(f.type==="save"&&f.to?" → "+acctName(f.to):"")))+'</small>'+(f.rest?'<small class="restcalc">'+(ri?'남는 돈: 월급 '+fmt(ri.salary)+' − 다른 고정비 '+fmt(ri.other)+(ri.short?' = '+fmt(ri.short)+'원 모자람':' = '+fmt(ri.amount)):'남는 돈 전부 · 월급을 넣으면 금액이 맞춰져요 (지금은 예상 금액)')+'</small>':'')+'</span><span class="a '+(f.type==="save"?'c-save':f.type==="move"?'':'c-out')+'">'+fmt(ri?ri.amount:f.amount)+'</span></button>'};
   let h='<div class="ledger">';
   if(!S.fixed.length)h+='<div class="empty"><b>등록된 고정비가 없어요.</b><span>아래 ‘고정비 추가’로 통신비·구독료처럼 매달 나가는 돈을 등록하세요.</span></div>';
   if(mon.length)h+='<div class="dgroup"><b>매월 나가는 돈 '+mon.length+'건</b><span class="sums">'+fmt(sum(mon))+'원</span></div>'+mon.map(row).join('');
@@ -825,7 +826,7 @@ function drawEntry(){
 }
 function openFixed(fx){
   const c=cfg();
-  form={kind:"fixed",id:fx?fx.id:null,name:fx?fx.name:"",type:fx?fx.type||"out":"out",amount:fx?fx.amount:"",category:fx?fx.category:"",group:fx?groupOf(fx.type||"out",fx.category):"",account:fx?fx.account:c.accounts[0].id,freq:fx?fx.freq||"monthly":"monthly",day:fx?fx.day:1,month:fx?fx.month||1:1,start:fx?fx.start||"":"",to:fx?fx.to||null:null,payday:fx?!!fx.payday:false,rest:fx?!!fx.rest:false,armed:false};
+  form={kind:"fixed",id:fx?fx.id:null,name:fx?fx.name:"",type:fx?fx.type||"out":"out",amount:fx?fx.amount:"",category:fx?fx.category:"",group:fx?groupOf(fx.type||"out",fx.category):"",account:fx?fx.account:c.accounts[0].id,freq:fx?fx.freq||"monthly":"monthly",day:fx?fx.day:1,month:fx?fx.month||1:1,start:fx?fx.start||"":"",to:fx?fx.to||null:null,payday:fx?!!fx.payday:false,rest:fx?!!fx.rest:false,payroll:fx?!!fx.payroll:false,armed:false};
   drawFixed();
 }
 function drawFixed(){
@@ -836,7 +837,8 @@ function drawFixed(){
   h+='<div class="seg three">'+[["out","지출"],["save","저축"],["move","옮기기"]].map(([k,l])=>'<button aria-pressed="'+(f.type===k)+'" data-act="x-type" data-k="'+k+'">'+l+'</button>').join("")+'</div>';
   h+='<div class="field"><label for="x-amt">금액 (원)</label><input id="x-amt" class="amt-in" inputmode="numeric" autocomplete="off" placeholder="0" value="'+(f.amount?fmt(f.amount):"")+'"></div>';
   if(f.type!=="move")h+='<div class="field"><span class="lab">분류</span>'+catPicker(f.type,f.category,f.group,"x-cat")+'</div>';
-  h+='<div class="field"><span class="lab">나가는 통장</span><div class="chips">'+c.accounts.map(a=>'<button class="chip" aria-pressed="'+(f.account===a.id)+'" data-act="x-acc" data-k="'+esc(a.id)+'">'+esc(a.name)+'</button>').join("")+'</div></div>';
+  if(f.type!=="move")h+='<div class="field"><div class="chips"><button class="chip" aria-pressed="'+!!f.payroll+'" data-act="x-payroll">월급에서 바로 빠짐</button></div><p class="hint">급여명세서 공제내역에서 빠지는 돈(교직원공제회 등)이면 켜세요. 월급은 통장에 들어온 금액 그대로 넣으면 되고, 이 돈은 통장 잔액에서 다시 빼지 않아요. 저축으로는 그대로 잡혀요.</p></div>';
+  h+='<div class="field"><span class="lab">'+(f.payroll&&f.type!=="move"?'명세서 공제 전 기준 통장 (월급이 들어오는 통장)':'나가는 통장')+'</span><div class="chips">'+c.accounts.map(a=>'<button class="chip" aria-pressed="'+(f.account===a.id)+'" data-act="x-acc" data-k="'+esc(a.id)+'">'+esc(a.name)+'</button>').join("")+'</div></div>';
   if(f.type==="save")h+=saveToField(f.to,f.account,"x-saveto");
   if(f.type==="move")h+='<div class="field"><span class="lab">받는 통장</span><div class="chips">'+c.accounts.filter(a=>a.id!==f.account).map(a=>'<button class="chip" aria-pressed="'+(f.to===a.id)+'" data-act="x-moveto" data-k="'+esc(a.id)+'">'+esc(a.name)+'</button>').join("")+'</div><p class="hint">내 통장끼리 옮기는 돈이라 지출로 세지 않아요.</p></div>';
   h+='<div class="seg two">'+[["monthly","매월"],["yearly","매년"]].map(([k,l])=>'<button aria-pressed="'+(f.freq===k)+'" data-act="x-freq" data-k="'+k+'">'+l+'</button>').join("")+'</div>';
@@ -968,7 +970,7 @@ async function applyFixed(list){
     const f=x.f,date=x.d;if(!date)continue;
     let id=fxId(f,p)+(x.i?"-"+(x.i+1):"");while(ids.has(id))id+="b";ids.add(id);
     const type=f.type||"out";
-    const mv=type==="move";const o={date,type,amount:fxAmt(f,p),group:mv?"이동":groupOf(type,f.category),category:mv?"이동":f.category,account:f.account,memo:f.name,fixedId:f.id,createdAt:Date.now()};if((type==="save"||mv)&&f.to)o.to=f.to;if(mv){const r=bonusRate(f.to);if(r)o.bonus=Math.round(o.amount*r/100)}
+    const mv=type==="move";const o={date,type,amount:fxAmt(f,p),group:mv?"이동":groupOf(type,f.category),category:mv?"이동":f.category,account:f.account,memo:f.name,fixedId:f.id,createdAt:Date.now()};if((type==="save"||mv)&&f.to)o.to=f.to;if(f.payroll&&!mv)o.payroll=true;if(mv){const r=bonusRate(f.to);if(r)o.bonus=Math.round(o.amount*r/100)}
     const ok=await write(()=>db.collection("entries").doc(id).set(o));
     if(!ok)return;n++;
   }
@@ -1039,6 +1041,7 @@ document.addEventListener("click",async ev=>{
   if(act==="x-moveto"){form.to=k;return drawFixed()}
   if(act==="x-payday"){form.payday=!form.payday;return drawFixed()}
   if(act==="x-rest"){form.rest=!form.rest;return drawFixed()}
+  if(act==="x-payroll"){form.payroll=!form.payroll;return drawFixed()}
   if(act==="x-freq"){form.freq=k;return drawFixed()}
   if(act==="x-save"){
     const f=form;
@@ -1052,6 +1055,7 @@ document.addEventListener("click",async ev=>{
     if(f.start)doc.start=f.start;
     if(f.payday){doc.payday=true;doc.day=cfg().startDay}
     if(f.rest&&(f.type==="save"||f.type==="move")&&f.freq!=="yearly")doc.rest=true;
+    if(f.payroll&&f.type!=="move")doc.payroll=true;
     if((f.type==="save"||f.type==="move")&&f.to&&f.to!==f.account)doc.to=f.to;
     closeSheet();
     return write(()=>db.collection("fixed").doc(id).set(doc),"고정비를 저장했어요");
