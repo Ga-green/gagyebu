@@ -630,7 +630,7 @@ function daySums(list){let i=0,o=0;list.forEach(e=>{const v=Number(e.amount)||0;
 function renderList(p){
   let rows=S.entries.slice();
   if(S.day)rows=rows.filter(e=>e.date===S.day);
-  rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||0)-(a.createdAt||0));
+  rows.sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.createdAt||0)-(b.createdAt||0));
   let h='<div class="ledger">';
   if(S.day){const d=pdate(S.day);h+='<div class="colh day-h"><span>'+(d.getMonth()+1)+'월 '+d.getDate()+'일 ('+WK[d.getDay()]+') 거래</span><button data-act="day-clear">기간 전체 보기</button></div>'}
   if(!rows.length)return h+'<div class="empty"><b>'+(S.day?'이 날 기록이 없어요.':'이번 기간 기록이 아직 없어요.')+'</b><span>오른쪽 아래 ‘+ 기록’으로 지출이나 월급을 넣어보세요.</span></div></div>';
