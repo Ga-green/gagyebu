@@ -432,7 +432,7 @@ function fxAmt(f,p){if(f&&f.rest&&p){const r=restInfo(f,p);if(r)return r.amount}
 function restNote(p){
   let h='';
   S.fixed.forEach(f=>{if(!f.rest||f.active===false||!dueAll(f,p).length)return;const r=restInfo(f,p);if(!r||!r.short)return;
-    h+='<div class="notice warnbox"><b>이번 기간은 월급이 고정비보다 '+fmt(r.short)+'원 적어요.</b><span>'+esc(f.name)+'에 넣을 돈이 없어서 0원으로 잡았어요. 모자란 '+fmt(r.short)+'원은 모아 둔 돈(세이프박스·정기예금 등)에서 채워야 해요.</span></div>'});
+    h+='<div class="notice warnbox"><b>이번 기간은 월급이 고정비보다 '+fmt(r.short)+'원 적어요.</b><span>'+esc(f.name)+'에 넣을 돈이 없어서 0원으로 잡았어요. 모자란 '+fmt(r.short)+'원은 비상금이나 모아 둔 돈에서 채워야 해요.</span></div>'});
   return h;
 }
 function syncRest(p){
