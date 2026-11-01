@@ -212,6 +212,9 @@ header.top .monthnav{justify-self:center}
 .actions .danger.armed{background:var(--out);border-color:var(--out);color:var(--sheet)}
 .hint{font-size:12px;color:var(--muted);margin:0}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(140px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:12px;font-size:14px;z-index:40;max-width:calc(100% - 32px)}
+.notice.warnbox{display:flex;flex-direction:column;gap:4px;border-color:var(--warn);color:var(--ink);font-size:13px;padding:14px 16px}
+.notice.warnbox b{color:var(--warn)}
+.row2 .t small.restcalc{color:var(--accent);white-space:normal}
 .notice{background:var(--sheet);border:1px solid var(--line);border-radius:14px;padding:18px;color:var(--muted);font-size:14px}
 .set-row{display:flex;gap:8px;align-items:center}
 .set-row input{flex:1;min-width:0;font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
@@ -402,6 +405,7 @@ function periodLabel(p){
 function isCurrent(p){const t=todayStr();return t>=p.ss&&t<p.es}
 function dueAll(f,p){
   if(f.payday&&f.freq!=="yearly")return (f.start&&p.ss<f.start)?[]:[p.ss];
+  if(f.payday&&f.freq==="yearly")return (p.s.getMonth()+1!==Number(f.month)||(f.start&&p.ss<f.start))?[]:[p.ss];
   const out=[],sh=cfg().fixShift;
   for(const k of [-1,0,1]){
     const b=new Date(p.s.getFullYear(),p.s.getMonth()+k,1),yy=b.getFullYear(),mm=b.getMonth();
@@ -414,6 +418,31 @@ function dueAll(f,p){
   return out;
 }
 function dueIn(f,p){return dueAll(f,p)[0]||null}
+function restInfo(f,p){
+  const inP=e=>e.date>=p.ss&&e.date<p.es;
+  const pays=S.entries.filter(e=>e.type==="in"&&e.category==="월급"&&e.account===f.account&&inP(e));
+  if(!pays.length)return null;
+  const salary=pays.reduce((a,e)=>a+(Number(e.amount)||0),0);let other=0;
+  S.entries.forEach(e=>{if(e.fixedId&&e.fixedId!==f.id&&e.account===f.account&&inP(e))other+=Number(e.amount)||0});
+  pendingFixed(p).forEach(x=>{if(x.f.id!==f.id&&x.f.account===f.account)other+=Number(x.f.amount)||0});
+  const left=salary-other;
+  return{salary,other,left,amount:Math.max(0,left),short:left<0?-left:0};
+}
+function fxAmt(f,p){if(f&&f.rest&&p){const r=restInfo(f,p);if(r)return r.amount}return Number(f&&f.amount)||0}
+function restNote(p){
+  let h='';
+  S.fixed.forEach(f=>{if(!f.rest||f.active===false||!dueAll(f,p).length)return;const r=restInfo(f,p);if(!r||!r.short)return;
+    h+='<div class="notice warnbox"><b>이번 기간은 월급이 고정비보다 '+fmt(r.short)+'원 적어요.</b><span>'+esc(f.name)+'에 넣을 돈이 없어서 0원으로 잡았어요. 모자란 '+fmt(r.short)+'원은 모아 둔 돈(세이프박스·정기예금 등)에서 채워야 해요.</span></div>'});
+  return h;
+}
+function syncRest(p){
+  if(!db||!S.got.e||S.subKey!==p.ss+p.es)return;
+  S.restSync=S.restSync||{};
+  S.fixed.forEach(f=>{if(!f.rest)return;const r=restInfo(f,p);if(!r)return;
+    S.entries.forEach(e=>{if(e.fixedId!==f.id||e.done||(Number(e.amount)||0)===r.amount||S.restSync[e.id]===r.amount)return;
+      S.restSync[e.id]=r.amount;const d=Object.assign({},e);delete d.id;d.amount=r.amount;
+      write(()=>db.collection("entries").doc(e.id).set(d)).then(ok=>{if(!ok)delete S.restSync[e.id]})})});
+}
 function fxCount(){const c={};S.entries.forEach(e=>{if(e.fixedId)c[e.fixedId]=(c[e.fixedId]||0)+1});return c}
 function fxId(f,p){return "fx-"+f.id+"-"+p.ss.replace(/-/g,"")}
 
@@ -490,8 +519,9 @@ function render(){
   if(!S.unlocked){fab.hidden=true;setNav(false);if(!pin||pin.mode!=="unlock")pin={mode:"unlock",val:"",msg:""};body.innerHTML=lockHTML();return}
   fab.hidden=false;setNav(true);
   let h='';
-  if(S.tab==="cal")h=summaryCard()+pendingBanner(p)+renderCal(p)+renderList(p);
-  else if(S.tab==="fixed")h=viewFixed(p);
+  syncRest(p);
+  if(S.tab==="cal")h=summaryCard()+restNote(p)+pendingBanner(p)+renderCal(p)+renderList(p);
+  else if(S.tab==="fixed")h=restNote(p)+viewFixed(p);
   else if(S.tab==="acct")h=viewAcct(p);
   else if(S.tab==="ana")h=summaryCard()+renderAna();
   else h=renderPhotos();
@@ -522,12 +552,12 @@ function riskInfo(p){
   if(missing===acc.length)return{noBal:true};
   let fut=0;
   S.entries.forEach(e=>{if(e.date>t&&e.date<p.es)ids.forEach(id=>{fut+=flow(e,id)})});
-  pendingFixed(p).forEach(x=>{if(x.d<=t)return;const f=x.f,ty=f.type||"out",r=ty==="move"?bonusRate(f.to):0,e={type:ty,amount:f.amount,account:f.account,to:f.to,bonus:r?Math.round((Number(f.amount)||0)*r/100):0};ids.forEach(id=>{fut+=flow(e,id)})});
+  pendingFixed(p).forEach(x=>{if(x.d<=t)return;const f=x.f,ty=f.type||"out",r=ty==="move"?bonusRate(f.to):0,am=fxAmt(f,p),e={type:ty,amount:am,account:f.account,to:f.to,bonus:r?Math.round(am*r/100):0};ids.forEach(id=>{fut+=flow(e,id)})});
   const days=Math.max(1,Math.round((p.e-p.s)/864e5)),left=Math.max(0,Math.round((p.e-pdate(t))/864e5)-1);
   const es=envStats(),bud=es?es.list.reduce((a,v)=>a+v.amount,0):cfg().lifeBudget,need=es?es.list.reduce((a,v)=>a+Math.max(0,v.left),0):(bud?Math.round(bud/days*left):0),end=cash+fut;
   let life=null;const la=cfg().lifeAcc&&cfg().accounts.find(a=>a.id===cfg().lifeAcc);
   if(la&&balNow(la)!==null){let lf=0;S.entries.forEach(e=>{if(e.date>t&&e.date<p.es)lf+=flow(e,la.id)});
-    pendingFixed(p).forEach(x=>{if(x.d<=t)return;const f=x.f,ty=f.type||"out",r=ty==="move"?bonusRate(f.to):0;lf+=flow({type:ty,amount:f.amount,account:f.account,to:f.to,bonus:r?Math.round((Number(f.amount)||0)*r/100):0},la.id)});
+    pendingFixed(p).forEach(x=>{if(x.d<=t)return;const f=x.f,ty=f.type||"out",r=ty==="move"?bonusRate(f.to):0,am=fxAmt(f,p);lf+=flow({type:ty,amount:am,account:f.account,to:f.to,bonus:r?Math.round(am*r/100):0},la.id)});
     const now=balNow(la),avail=now+lf;life={name:la.name.replace(/\s*\(.*\)\s*$/,"")||la.name,now,lf,avail,margin:avail-need,perDay:left?Math.floor(avail/left):avail}}
   return{cash,fut,end,need,margin:end-need,bud,left,missing,life,env:!!es};
 }
@@ -560,14 +590,14 @@ function summaryCard(){
 }
 function pendingBanner(p){
   const pend=pendingFixed(p);if(!pend.length)return '';
-  const sum=pend.reduce((s,x)=>s+(x.f.type==="move"?0:(Number(x.f.amount)||0)),0);
+  const sum=pend.reduce((s,x)=>s+(x.f.type==="move"?0:fxAmt(x.f,p)),0);
   return '<div class="pending"><span>아직 안 넣은 고정비 '+pend.length+'건 · <b class="num">'+fmt(sum)+'원</b></span><button data-act="apply-all">한 번에 넣기</button></div>';
 }
 function md(ds){const d=pdate(ds);return (d.getMonth()+1)+'.'+d.getDate()}
 function uncheckedFixed(p){
   const fx=Object.fromEntries(S.fixed.map(f=>[f.id,f])),out=[];
   S.entries.forEach(e=>{if(e.fixedId&&!e.done)out.push({d:e.date,name:e.memo||(fx[e.fixedId]&&fx[e.fixedId].name)||"",amount:Number(e.amount)||0,type:e.type,id:e.id})});
-  pendingFixed(p).forEach(x=>out.push({d:x.d,name:x.f.name,amount:Number(x.f.amount)||0,type:x.f.type||"out",pending:true}));
+  pendingFixed(p).forEach(x=>out.push({d:x.d,name:x.f.name,amount:fxAmt(x.f,p),type:x.f.type||"out",pending:true}));
   return out.sort((a,b)=>a.d.localeCompare(b.d)||a.name.localeCompare(b.name));
 }
 function uncheckedCard(p,u,label){
@@ -625,7 +655,7 @@ function rowEntry(e,slot){
   const title=e.type==="move"?(acctName(e.account)+" → "+acctName(e.to)):(e.memo||e.category||"");
   const sub=e.type==="move"?((e.memo||"통장 이동")+(e.bonus?" · 충전 혜택 +"+fmt(e.bonus)+"원":"")):((e.group||groupOf(e.type,e.category))+" · "+acctName(e.account)+(e.type==="save"&&e.to?" → "+acctName(e.to):""));
   const ph=(e.photos&&e.photos.length)?'<img class="thumb" alt="" loading="lazy" src="'+blob(e.photos[0])+'">':'';
-  const row='<button class="row2" data-act="edit" data-id="'+esc(e.id)+'"><span class="cat-pill '+cls+'">'+esc(pill)+'</span><span class="t"><b>'+esc(title)+(e.fixedId?'<span class="tag">고정</span>':'')+(()=>{const i=envOf(e);return i>=0?'<span class="tag env'+(i%2)+'">'+esc(cfg().envelopes[i].name)+'</span>':''})()+'</b><small>'+esc(sub)+'</small></span><span class="ar">'+ph+amtCell(e)+'</span></button>';
+  const row='<button class="row2" data-act="edit" data-id="'+esc(e.id)+'"><span class="cat-pill '+cls+'">'+esc(pill)+'</span><span class="t"><b>'+esc(title)+(e.fixedId?'<span class="tag">'+((S.fixed.find(x=>x.id===e.fixedId)||{}).rest?'남는 돈':'고정')+'</span>':'')+(()=>{const i=envOf(e);return i>=0?'<span class="tag env'+(i%2)+'">'+esc(cfg().envelopes[i].name)+'</span>':''})()+'</b><small>'+esc(sub)+'</small></span><span class="ar">'+ph+amtCell(e)+'</span></button>';
   if(e.fixedId)return '<div class="rowx">'+row+'<button class="chk" data-act="done" data-id="'+esc(e.id)+'" role="checkbox" aria-checked="'+!!e.done+'" aria-label="'+esc(title)+' 했음 표시"><i></i></button></div>';
   return slot?'<div class="rowx">'+row+'<span></span></div>':row;
 }
@@ -688,8 +718,8 @@ function renderFixed(p){
   const mon=S.fixed.filter(f=>f.freq!=="yearly").sort((a,b)=>{const x=rk(a),y=rk(b);return x[0]-y[0]||x[1].localeCompare(y[1])});
   const yr=S.fixed.filter(f=>f.freq==="yearly").sort((a,b)=>(a.month||0)-(b.month||0)||a.day-b.day);
   const sum=l=>l.filter(f=>f.active!==false&&f.type!=="move").reduce((s,f)=>s+(Number(f.amount)||0),0);
-  const row=f=>{const ds=dueAll(f,p),n=ds.length,st=(!n?'':(dn[f.id]||0)>=n?'<span class="stat ok">체크함</span>':(cnt[f.id]||0)>=n?'<span class="stat wait">체크 전</span>':'<span class="stat wait">넣기 전</span>')+(n?'<span class="stat">'+ds.map(md).join(", ")+'</span>':'')+(n>1?'<span class="stat wait">이번 기간 '+n+'번</span>':''),sf=startTag(f);
-    return '<button class="row2" data-act="edit-fixed" data-id="'+esc(f.id)+'"><span class="cat-pill '+(f.type==="save"?"save":f.type==="move"?"move":"")+'">'+(f.freq==="yearly"?f.month+'월 '+f.day+'일':f.payday?'월급날':'매월 '+f.day+'일')+'</span><span class="t"><b>'+esc(f.name)+st+sf+'</b><small>'+(f.type==="move"?'옮기기 · '+esc(acctName(f.account)+" → "+acctName(f.to)):esc(groupOf(f.type||"out",f.category))+' › '+esc(f.category)+' · '+esc(acctName(f.account)+(f.type==="save"&&f.to?" → "+acctName(f.to):"")))+'</small></span><span class="a '+(f.type==="save"?'c-save':f.type==="move"?'':'c-out')+'">'+fmt(f.amount)+'</span></button>'};
+  const row=f=>{const ds=dueAll(f,p),n=ds.length,ri=f.rest?restInfo(f,p):null,st=(!n?'':(dn[f.id]||0)>=n?'<span class="stat ok">체크함</span>':(cnt[f.id]||0)>=n?'<span class="stat wait">체크 전</span>':'<span class="stat wait">넣기 전</span>')+(n?'<span class="stat">'+ds.map(md).join(", ")+'</span>':'')+(n>1?'<span class="stat wait">이번 기간 '+n+'번</span>':''),sf=startTag(f);
+    return '<button class="row2" data-act="edit-fixed" data-id="'+esc(f.id)+'"><span class="cat-pill '+(f.type==="save"?"save":f.type==="move"?"move":"")+'">'+(f.freq==="yearly"?f.month+'월 '+(f.payday?'월급날':f.day+'일'):f.payday?'월급날':'매월 '+f.day+'일')+'</span><span class="t"><b>'+esc(f.name)+st+sf+'</b><small>'+(f.type==="move"?'옮기기 · '+esc(acctName(f.account)+" → "+acctName(f.to)):esc(groupOf(f.type||"out",f.category))+' › '+esc(f.category)+' · '+esc(acctName(f.account)+(f.type==="save"&&f.to?" → "+acctName(f.to):"")))+'</small>'+(f.rest?'<small class="restcalc">'+(ri?'남는 돈: 월급 '+fmt(ri.salary)+' − 다른 고정비 '+fmt(ri.other)+(ri.short?' = '+fmt(ri.short)+'원 모자람':' = '+fmt(ri.amount)):'남는 돈 전부 · 월급을 넣으면 금액이 맞춰져요 (지금은 예상 금액)')+'</small>':'')+'</span><span class="a '+(f.type==="save"?'c-save':f.type==="move"?'':'c-out')+'">'+fmt(ri?ri.amount:f.amount)+'</span></button>'};
   let h='<div class="ledger">';
   if(!S.fixed.length)h+='<div class="empty"><b>등록된 고정비가 없어요.</b><span>아래 ‘고정비 추가’로 통신비·구독료처럼 매달 나가는 돈을 등록하세요.</span></div>';
   if(mon.length)h+='<div class="dgroup"><b>매월 나가는 돈 '+mon.length+'건</b><span class="sums">'+fmt(sum(mon))+'원</span></div>'+mon.map(row).join('');
@@ -795,7 +825,7 @@ function drawEntry(){
 }
 function openFixed(fx){
   const c=cfg();
-  form={kind:"fixed",id:fx?fx.id:null,name:fx?fx.name:"",type:fx?fx.type||"out":"out",amount:fx?fx.amount:"",category:fx?fx.category:"",group:fx?groupOf(fx.type||"out",fx.category):"",account:fx?fx.account:c.accounts[0].id,freq:fx?fx.freq||"monthly":"monthly",day:fx?fx.day:1,month:fx?fx.month||1:1,start:fx?fx.start||"":"",to:fx?fx.to||null:null,payday:fx?!!fx.payday:false,armed:false};
+  form={kind:"fixed",id:fx?fx.id:null,name:fx?fx.name:"",type:fx?fx.type||"out":"out",amount:fx?fx.amount:"",category:fx?fx.category:"",group:fx?groupOf(fx.type||"out",fx.category):"",account:fx?fx.account:c.accounts[0].id,freq:fx?fx.freq||"monthly":"monthly",day:fx?fx.day:1,month:fx?fx.month||1:1,start:fx?fx.start||"":"",to:fx?fx.to||null:null,payday:fx?!!fx.payday:false,rest:fx?!!fx.rest:false,armed:false};
   drawFixed();
 }
 function drawFixed(){
@@ -810,8 +840,8 @@ function drawFixed(){
   if(f.type==="save")h+=saveToField(f.to,f.account,"x-saveto");
   if(f.type==="move")h+='<div class="field"><span class="lab">받는 통장</span><div class="chips">'+c.accounts.filter(a=>a.id!==f.account).map(a=>'<button class="chip" aria-pressed="'+(f.to===a.id)+'" data-act="x-moveto" data-k="'+esc(a.id)+'">'+esc(a.name)+'</button>').join("")+'</div><p class="hint">내 통장끼리 옮기는 돈이라 지출로 세지 않아요.</p></div>';
   h+='<div class="seg two">'+[["monthly","매월"],["yearly","매년"]].map(([k,l])=>'<button aria-pressed="'+(f.freq===k)+'" data-act="x-freq" data-k="'+k+'">'+l+'</button>').join("")+'</div>';
-  if(f.freq!=="yearly")h+='<div class="field"><div class="chips"><button class="chip" aria-pressed="'+!!f.payday+'" data-act="x-payday">월급날에 맞추기</button></div><p class="hint">켜면 25일이 주말·공휴일이라 월급이 당겨지는 달엔 이 항목도 같이 당겨져요.</p></div>';
-  if(!(f.freq!=="yearly"&&f.payday))h+='<div class="two-col">'+(f.freq==="yearly"?'<div class="field"><label for="x-month">월</label><select id="x-month">'+Array.from({length:12},(_,i)=>'<option value="'+(i+1)+'"'+(Number(f.month)===i+1?" selected":"")+'>'+(i+1)+'월</option>').join("")+'</select></div>':'')+'<div class="field"><label for="x-day">나가는 날</label><select id="x-day">'+Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'"'+(Number(f.day)===i+1?" selected":"")+'>'+(i+1)+'일</option>').join("")+'</select></div></div>';
+  h+='<div class="field"><div class="chips"><button class="chip" aria-pressed="'+!!f.payday+'" data-act="x-payday">월급날에 맞추기</button>'+((f.type==="save"||f.type==="move")&&f.freq!=="yearly"?'<button class="chip" aria-pressed="'+!!f.rest+'" data-act="x-rest">남는 돈 전부 넣기</button>':'')+'</div><p class="hint">월급날에 맞추면 25일이 주말·공휴일이라 월급이 당겨지는 달엔 이 항목도 같이 당겨져요.'+((f.type==="save"||f.type==="move")&&f.freq!=="yearly"?' ‘남는 돈 전부 넣기’를 켜면 그 기간 월급을 넣었을 때 ‘월급 − 같은 통장에서 나가는 다른 고정비’로 금액이 바뀌어요. 위 금액은 월급을 넣기 전까지 쓰는 예상 금액이에요.':'')+'</p></div>';
+  if(!f.payday||f.freq==="yearly")h+='<div class="two-col">'+(f.freq==="yearly"?'<div class="field"><label for="x-month">월</label><select id="x-month">'+Array.from({length:12},(_,i)=>'<option value="'+(i+1)+'"'+(Number(f.month)===i+1?" selected":"")+'>'+(i+1)+'월</option>').join("")+'</select></div>':'')+(f.payday?'':'<div class="field"><label for="x-day">나가는 날</label><select id="x-day">'+Array.from({length:31},(_,i)=>'<option value="'+(i+1)+'"'+(Number(f.day)===i+1?" selected":"")+'>'+(i+1)+'일</option>').join("")+'</select></div>')+'</div>';
   h+='<div class="field"><label for="x-start">시작하는 달 (비우면 바로 시작)</label><input id="x-start" type="month" value="'+esc(f.start?f.start.slice(0,7):"")+'"></div>';
   h+='<p class="hint">29~31일로 정한 항목은 그 날짜가 없는 달엔 말일로 들어가요. 시작하는 달을 정하면 그 전 달에는 고정비로 잡히지 않아요.</p>';
   h+='<div class="actions">'+(f.id?'<button class="danger'+(f.armed?' armed':'')+'" data-act="x-del">'+(f.armed?"한 번 더 누르면 삭제":"삭제")+'</button>':'<button data-act="close">닫기</button>')+'<button class="primary" data-act="x-save">저장</button></div></div></div>';
@@ -938,7 +968,7 @@ async function applyFixed(list){
     const f=x.f,date=x.d;if(!date)continue;
     let id=fxId(f,p)+(x.i?"-"+(x.i+1):"");while(ids.has(id))id+="b";ids.add(id);
     const type=f.type||"out";
-    const mv=type==="move";const o={date,type,amount:Number(f.amount)||0,group:mv?"이동":groupOf(type,f.category),category:mv?"이동":f.category,account:f.account,memo:f.name,fixedId:f.id,createdAt:Date.now()};if((type==="save"||mv)&&f.to)o.to=f.to;if(mv){const r=bonusRate(f.to);if(r)o.bonus=Math.round(o.amount*r/100)}
+    const mv=type==="move";const o={date,type,amount:fxAmt(f,p),group:mv?"이동":groupOf(type,f.category),category:mv?"이동":f.category,account:f.account,memo:f.name,fixedId:f.id,createdAt:Date.now()};if((type==="save"||mv)&&f.to)o.to=f.to;if(mv){const r=bonusRate(f.to);if(r)o.bonus=Math.round(o.amount*r/100)}
     const ok=await write(()=>db.collection("entries").doc(id).set(o));
     if(!ok)return;n++;
   }
@@ -1008,6 +1038,7 @@ document.addEventListener("click",async ev=>{
   if(act==="x-saveto"){form.to=k||null;return drawFixed()}
   if(act==="x-moveto"){form.to=k;return drawFixed()}
   if(act==="x-payday"){form.payday=!form.payday;return drawFixed()}
+  if(act==="x-rest"){form.rest=!form.rest;return drawFixed()}
   if(act==="x-freq"){form.freq=k;return drawFixed()}
   if(act==="x-save"){
     const f=form;
@@ -1019,7 +1050,8 @@ document.addEventListener("click",async ev=>{
     const doc={name:f.name.trim(),type:f.type,amount:f.amount,category:f.category,account:f.account,freq:f.freq,day:Number(f.day),active:true};
     if(f.freq==="yearly")doc.month=Number(f.month);
     if(f.start)doc.start=f.start;
-    if(f.freq!=="yearly"&&f.payday){doc.payday=true;doc.day=cfg().startDay}
+    if(f.payday){doc.payday=true;doc.day=cfg().startDay}
+    if(f.rest&&(f.type==="save"||f.type==="move")&&f.freq!=="yearly")doc.rest=true;
     if((f.type==="save"||f.type==="move")&&f.to&&f.to!==f.account)doc.to=f.to;
     closeSheet();
     return write(()=>db.collection("fixed").doc(id).set(doc),"고정비를 저장했어요");
