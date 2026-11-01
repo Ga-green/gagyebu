@@ -84,6 +84,8 @@ header.top .monthnav{justify-self:center}
 .triple{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;border-top:1px dashed var(--line);padding-top:12px}
 .triple div{display:flex;flex-direction:column;gap:2px;min-width:0}
 .triple span{font-size:12px;color:var(--muted)}
+.left-amt.pre{font-size:18px;color:var(--muted);font-weight:600}
+.innote{font-size:12px;color:var(--muted);margin-top:-4px}
 .triple b{font-family:var(--f-num);font-weight:600;font-size:15px;overflow-wrap:anywhere}
 .risk{display:flex;flex-direction:column;gap:4px;border-top:1px dashed var(--line);padding-top:12px}
 .risk b{font-size:14px;font-weight:700;display:flex;align-items:center;gap:7px}
@@ -586,8 +588,10 @@ function riskCard(){
 }
 function summaryCard(){
   const t=totals(),left=t.in-t.out-t.save;
-  return '<section class="summary"><div class="sum-top"><span class="left-label">이번 기간 남은 돈</span><b class="left-amt num '+(left<0?'c-out':'')+'">'+(left<0?'−':'')+fmt(Math.abs(left))+'원</b></div>'+
-    '<div class="triple"><div><span>수입</span><b class="c-in">'+fmt(t.in)+'</b></div><div><span>지출</span><b class="c-out">'+fmt(t.out)+'</b></div><div><span>저축</span><b class="c-save">'+fmt(t.save)+'</b></div></div>'+envCard()+riskCard()+'</section>';
+  const noPay=!S.entries.some(e=>e.type==="in"&&e.category==="월급"),pr=S.entries.reduce((a,e)=>a+(e.payroll&&e.type!=="in"?Number(e.amount)||0:0),0);
+  const inNote=noPay?'<small class="innote">월급 입력 전'+(pr?' · 지금은 월급에서 바로 빠지는 '+fmt(pr)+'원만 잡혀 있어요':'')+'</small>':(pr?'<small class="innote">통장 입금액 + 월급에서 바로 빠진 '+fmt(pr)+'원</small>':'');
+  return '<section class="summary"><div class="sum-top"><span class="left-label">이번 기간 남은 돈</span>'+(noPay&&t.in-pr<=0?'<b class="left-amt pre">월급 입력 전</b>':'<b class="left-amt num '+(left<0?'c-out':'')+'">'+(left<0?'−':'')+fmt(Math.abs(left))+'원</b>')+'</div>'+
+    '<div class="triple"><div><span>수입</span><b class="c-in">'+fmt(t.in)+'</b></div><div><span>지출</span><b class="c-out">'+fmt(t.out)+'</b></div><div><span>저축</span><b class="c-save">'+fmt(t.save)+'</b></div></div>'+inNote+envCard()+riskCard()+'</section>';
 }
 function pendingBanner(p){
   const pend=pendingFixed(p);if(!pend.length)return '';
